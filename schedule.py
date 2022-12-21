@@ -141,7 +141,7 @@ def test_objective(t_data, v_data):
         **{f'num_filters{i}': 20 for i in range(4)},
         **{f'filter_width{i}': 11 for i in range(4)},
         'num_layers': 4,
-        'max_epochs': 10,
+        'max_epochs': 500,
         'd2x': 0.000001,
         'd2t': 1e-2,
         'center': 1e-2,

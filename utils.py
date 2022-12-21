@@ -143,7 +143,7 @@ def train_loop_org(config,
                    device=None,
                    checkpoint_dir=None,
                    verbose=1,
-                   patience=20):
+                   patience=50):
     '''
         Train loop for a given config.
     '''
