@@ -1,11 +1,26 @@
 # foundation
-To clone run:
+
+To clone, run:
+```console
 git clone --recurse-submodules git@github.com:VisNeuroLab/foundation.git
+```
 
-*For contributers:*
+**For contributers:**
 
-In the datasets submodule, run the following commands:
+* In the datasets submodule, checkout the branch "foundation" and ensure its up to date.
+* For each other submodule, checkout main.
+
+```console
+cd datasets
 git checkout -b foundation
 git pull origin foundation
 
-For each other submodule, checkout the main branch.
+cd ../NDNT
+git checkout main
+cd ../models
+git checkout main
+cd ../
+```
+
+**Sanity Check**:
+* Run preprocess, then once it is done run schedule.
