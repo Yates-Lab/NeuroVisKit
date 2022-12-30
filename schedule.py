@@ -16,15 +16,14 @@ import matplotlib
 from datasets.mitchell.pixel.utils import get_stim_list
 from models.cnns import CNNdense
 from utils import train_loop_org, unpickle_data, ModelGenerator, initialize_gaussian_envelope
-matplotlib.use('Agg')
-seed = 420
-np.random.seed(seed)
-random.seed(seed)
-torch.manual_seed(seed)
-os.environ['PYTHONHASHSEED']=str(seed)
-torch.cuda.manual_seed(str(seed))
+init_seed = 0
+np.random.seed(init_seed)
+random.seed(init_seed)
+torch.manual_seed(init_seed)
+os.environ['PYTHONHASHSEED']=str(init_seed)
+torch.cuda.manual_seed(str(init_seed))
 intended_device = torch.device(
-    'cuda:0' if torch.cuda.is_available() else 'cpu')
+    'cuda:1' if torch.cuda.is_available() else 'cpu')
 print('Intended device: ', intended_device)
 
 #%%
@@ -34,6 +33,7 @@ print('Intended device: ', intended_device)
 test = True # Short test or full run.
 modify_tmp_dir = False # If low on space, can modify tmp dir to a different drive. This requires starting ray from command line to indicate the new tmp dir.
 RUN_NAME = 'foundation_run' # Name of log dir.
+seed_model = 420
 nsamples_train=236452
 nsamples_val=56643
 
@@ -41,9 +41,6 @@ nsamples_val=56643
 # Prepare helpers for training.
 if not test and modify_tmp_dir:
     ray.init(address='auto')
-sesslist = list(get_stim_list().keys())
-SESSION_NAME = '20200304'  # '20220610'
-NBname = f'shifter_{SESSION_NAME}'
 cwd = os.getcwd()
 dirname = os.path.join(cwd, 'data')
 logdir = os.path.join(dirname, 'tensorboard')
@@ -120,7 +117,7 @@ def get_model(config, device='cpu', dense=True):
     cr0.prepare_regularization()
     return cr0
 
-model_gen = ModelGenerator(get_model, seed)
+model_gen = ModelGenerator(get_model, seed_model)
 
 def train_loop(config, t_data=None, v_data=None):
     '''
@@ -133,25 +130,26 @@ def train_loop(config, t_data=None, v_data=None):
     session.report(out, checkpoint=Checkpoint.from_directory(cp_dir))
     return out
 
-def test_objective(t_data, v_data):
+def test_objective(t_data, v_data, seed=None, name='checkpoint'):
     '''
         Test objective function for training.
     '''
+    filts = [20, 20, 20, 20]
     config_i = {
-        **{f'num_filters{i}': 20 for i in range(4)},
+        **{f'num_filters{i}': filts[i] for i in range(4)},
         **{f'filter_width{i}': 11 for i in range(4)},
         'num_layers': 4,
-        'max_epochs': 500,
+        'max_epochs': 50,
         'd2x': 0.000001,
         'd2t': 1e-2,
         'center': 1e-2,
         'edge_t': 1e-1,
     }
-    cp_dir = os.path.join(os.getcwd(), 'data', 'checkpoint')
+    cp_dir = os.path.join(os.getcwd(), 'data', name)
     if not os.path.exists(cp_dir):
         os.mkdir(cp_dir)
     print(train_loop_org(config_i, model_gen.get_model, t_data, v_data,
-                         fixational_inds=fix_inds, cids=cids, device='cuda:0', checkpoint_dir=cp_dir, verbose=2))
+                         fixational_inds=fix_inds, cids=cids, device=intended_device, checkpoint_dir=cp_dir, verbose=2, seed=seed))
 
 # %%
 # Load data.
@@ -160,7 +158,11 @@ train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val
 #%%
 # Run.
 if test:
-    test_objective(train_data, val_data)
+    try:
+        for i in range(100):
+            test_objective(train_data, val_data, seed=i, name=f'checkpoint_{i}')
+    except Exception as e:
+        print(e)
 if not test:
     trainable_with_data = tune.with_parameters(
         train_loop, t_data=train_data, v_data=val_data)

@@ -21,7 +21,7 @@ batch_size = 1000
 
 #%%
 # Process.
-device = torch.device('cuda')
+device = torch.device('cpu')
 dtype = torch.float32
 sesslist = list(get_stim_list().keys())
 NBname = 'shifter_{}'.format(sessname)

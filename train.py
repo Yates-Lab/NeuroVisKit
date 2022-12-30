@@ -129,45 +129,49 @@ def train(model,
 
     optimizer.zero_grad()
     # main loop for training
-    for epoch in range(max_epochs):
-        if hasattr(model, "pre_epoch"):
-            model.pre_epoch()
-        # train one epoch
-        out = train_one_epoch(train_loader)
-        train_loss = out['train_loss']
-        if np.isnan(train_loss):
-            verbose_print("Exiting: nan training loss.", v=1)
-            break
-        # model.cpu()
-        out = validate_one_epoch(val_loader)
-        this_val = out['val_loss']
-        train_scores.append(train_loss)
-        val_scores.append(this_val)
-        if val_loss_min > this_val:
-            verbose_print("Checkpointing model...", v=2)
-            model.to("cpu")
-            saved_model = (deepcopy(model), epoch)
-            model.to(device)
-            verbose_print("Finished checkpointing", v=2)
-        elif patience is not None:
-            e = 0 #make it greater than zero in case you want to stop if doesn't converge.
-            if (this_val-val_loss_min)/val_loss_min < e:
-                patience -= 0.1
-            else:
-                patience -= 1
-            verbose_print(
-                f"Losing patience ಠ_ಠ (last val: {val_loss_min:.3f}, current val: {this_val:.3f}, patience: {patience})", v=2)
-            if patience < 0:
-                verbose_print("Early stopping...", "epoch", epoch, v=1)
+    try:
+        for epoch in range(max_epochs):
+            if hasattr(model, "pre_epoch"):
+                model.pre_epoch()
+            # train one epoch
+            out = train_one_epoch(train_loader)
+            train_loss = out['train_loss']
+            if np.isnan(train_loss):
+                verbose_print("Exiting: nan training loss.", v=1)
                 break
-        # model.to(device)
-        val_loss_min = min(this_val, val_loss_min)
-        verbose_print("Epoch %d: train loss %.4f val loss %.4f" %
-                      (epoch, train_loss, this_val), v=2)
+            # model.cpu()
+            out = validate_one_epoch(val_loader)
+            this_val = out['val_loss']
+            train_scores.append(train_loss)
+            val_scores.append(this_val)
+            if val_loss_min > this_val:
+                verbose_print("Checkpointing model...", v=2)
+                model.to("cpu")
+                del saved_model
+                saved_model = (deepcopy(model), epoch)
+                model.to(device)
+                verbose_print("Finished checkpointing", v=2)
+            elif patience is not None:
+                e = 0 #make it greater than zero in case you want to stop if doesn't converge.
+                if (this_val-val_loss_min)/val_loss_min < e:
+                    patience -= 0.1
+                else:
+                    patience -= 1
+                verbose_print(
+                    f"Losing patience ಠ_ಠ (best val: {val_loss_min:.3f}, current val: {this_val:.3f}, patience: {patience})", v=2)
+                if patience < 0:
+                    verbose_print("Early stopping...", "epoch", epoch, v=1)
+                    break
+            # model.to(device)
+            val_loss_min = min(this_val, val_loss_min)
+            verbose_print("Epoch %d: train loss %.4f val loss %.4f" %
+                        (epoch, train_loss, this_val), v=2)
 
-        # # checkpoint
-        # self.checkpoint_model(self.epoch, is_best=is_best)
-    #     return
+            # # checkpoint
+            # self.checkpoint_model(self.epoch, is_best=is_best)
+        #     return
+    except:
+        print("Exception caught, exiting gracefully")
     graceful_exit()
     print(val_loss_min)
     return val_loss_min

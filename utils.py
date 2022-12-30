@@ -118,11 +118,9 @@ def get_datasets(train_data, val_data, device=None, batch_size=1000):
         Get datasets from data files.
     '''
     train_ds = GenericDataset(train_data, device)
-    train_dl = DataLoader(train_ds, batch_size=batch_size,
-                          shuffle=True, num_workers=0)
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     val_ds = GenericDataset(val_data, device)
-    val_dl = DataLoader(val_ds, batch_size=batch_size,
-                        shuffle=True, num_workers=0)
+    val_dl = DataLoader(val_ds, batch_size=batch_size)
     return train_dl, val_dl, train_ds, val_ds
 
 
@@ -143,22 +141,21 @@ def train_loop_org(config,
                    device=None,
                    checkpoint_dir=None,
                    verbose=1,
-                   patience=50):
+                   patience=50,
+                   seed=None):
     '''
         Train loop for a given config.
     '''
     device = torch.device(device if device else "cuda")
-    model = get_model(config, device)
     memory_clear()
+    model = get_model(config, device, seed)
     if not train_data or not val_data:
         print("Ray dataset not working. Falling back on pickled dataset.")
         train_data, val_data = unpickle_data(device=device)
     train_dl, val_dl, train_ds, _ = get_datasets(
         train_data, val_data, device=device)
-    memory_clear()
     max_epochs = config['max_epochs']
-    optimizer = torch.optim.Adam(
-        model.parameters(), lr=0.001, weight_decay=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     val_loss_min = train(
         model.to(device),
         train_dl,
@@ -171,6 +168,7 @@ def train_loop_org(config,
         patience=patience)
     # if fixational_inds is not None and cids is not None:
     #     log_transients(model, train_ds, fixational_inds, cids)
+    del model, optimizer
     return {"score": -val_loss_min}
 
 def load_model(checkpoint_path, model):
@@ -204,18 +202,25 @@ class ModelGenerator:
         Asynchronously generate models that all have the exact same seeds/initializations.
     '''
     def __init__(self, model_func, seed=0):
+        if seed is not None:
+            print("Seeded model: ", seed)
         if isinstance(seed, int):
             seed = [seed]*5
         self.seed = seed
         self.lock = Lock()
         self.model_func = model_func
-    def get_model(self, config, device="cpu"):
+    def get_model(self, config, device="cpu", seed=None):
         with self.lock:
-            np.random.seed(self.seed[0])
-            random.seed(self.seed[1])
-            torch.manual_seed(self.seed[2])
-            os.environ['PYTHONHASHSEED']=str(self.seed[3])
-            torch.cuda.manual_seed(self.seed[4])
+            if seed is not None:
+                if isinstance(seed, int):
+                    seed = [seed]*5
+                self.seed = seed
+            if self.seed is not None:
+                np.random.seed(self.seed[0])
+                random.seed(self.seed[1])
+                torch.manual_seed(self.seed[2])
+                os.environ['PYTHONHASHSEED']=str(self.seed[3])
+                torch.cuda.manual_seed(self.seed[4])
             model = self.model_func(config, device)
             return model
     def test(self):
@@ -352,3 +357,68 @@ def plot_model(model):
         plt.imshow(model.readout.feature.get_weights())
         plt.xlabel("Neuron ID")
         plt.ylabel("Feature ID")
+    
+def eval_model(model, valid_dl):
+    loss = model.loss.unit_loss
+    model.eval()
+
+    LLsum, Tsum, Rsum = 0, 0, 0
+    from tqdm import tqdm
+        
+    device = next(model.parameters()).device  # device the model is on
+    if isinstance(valid_dl, dict):
+        for dsub in valid_dl.keys():
+                if valid_dl[dsub].device != device:
+                    valid_dl[dsub] = valid_dl[dsub].to(device)
+        rpred = model(valid_dl)
+        LLsum = loss(rpred,
+                    valid_dl['robs'][:,model.cids],
+                    data_filters=valid_dl['dfs'][:,model.cids],
+                    temporal_normalize=False)
+        Tsum = valid_dl['dfs'][:,model.cids].sum(dim=0)
+        Rsum = (valid_dl['dfs'][:,model.cids]*valid_dl['robs'][:,model.cids]).sum(dim=0)
+
+    else:
+        for data in tqdm(valid_dl, desc='Eval models'):
+                    
+            for dsub in data.keys():
+                if data[dsub].device != device:
+                    data[dsub] = data[dsub].to(device)
+            
+            with torch.no_grad():
+                rpred = model(data)
+                LLsum += loss(rpred,
+                        data['robs'][:,model.cids],
+                        data_filters=data['dfs'][:,model.cids],
+                        temporal_normalize=False)
+                Tsum += data['dfs'][:,model.cids].sum(dim=0)
+                Rsum += (data['dfs'][:,model.cids] * data['robs'][:,model.cids]).sum(dim=0)
+                
+    LLneuron = LLsum/Rsum.clamp(1)
+
+    rbar = Rsum/Tsum.clamp(1)
+    LLnulls = torch.log(rbar)-1
+    LLneuron = -LLneuron - LLnulls
+
+    LLneuron/=np.log(2)
+
+    return LLneuron.detach().cpu().numpy()
+
+def eval_model_summary(model, valid_dl):
+    ev = eval_model(model, valid_dl)
+    if np.inf in ev:
+        i = np.count_nonzero(np.isposinf(ev))
+        ni = np.count_nonzero(np.isneginf(ev))
+        print(f'Warning: {i} neurons have infinite bits/spike, and {ni} neurons have ninf.')
+        ev = ev[~np.isinf(ev)]
+    # Creating histogram
+    _, ax = plt.subplots()
+    ax.hist(ev, bins=10)
+    plt.axvline(x=np.max(ev), color='r', linestyle='--')
+    plt.axvline(x=np.min(ev), color='r', linestyle='--')
+    plt.xlabel("Bits/spike")
+    plt.ylabel("Neuron count")
+    plt.title("Model performance")
+    # Show plot
+    plt.show()
+# %%
