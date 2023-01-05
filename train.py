@@ -71,9 +71,9 @@ def train(model,
 
     def train_one_step(data):
         nonlocal n_iter
-        # for dsub in data:
-        #     if data[dsub].device != device:
-        #         data[dsub] = data[dsub].to(device)
+        for dsub in data:
+            if data[dsub].device != device:
+                data[dsub] = data[dsub].to(device)
         out = model.training_step(data)
         n_iter += 1
         loss = out['loss']
@@ -103,9 +103,9 @@ def train(model,
         nsteps = len(val_loader)
         with torch.no_grad():
             for batch_idx, data in enumerate(val_loader):
-                # for dsub in data:
-                #     if data[dsub].device != device:
-                #         data[dsub] = data[dsub].to(device)
+                for dsub in data:
+                    if data[dsub].device != device:
+                        data[dsub] = data[dsub].to(device)
                 out = model.validation_step(data)
                 runningloss += out['val_loss'].item()
                 torch.cuda.empty_cache()
@@ -149,6 +149,7 @@ def train(model,
                 model.to("cpu")
                 del saved_model
                 saved_model = (deepcopy(model), epoch)
+                checkpoint()
                 model.to(device)
                 verbose_print("Finished checkpointing", v=2)
             elif patience is not None:
@@ -167,9 +168,9 @@ def train(model,
             verbose_print("Epoch %d: train loss %.4f val loss %.4f" %
                         (epoch, train_loss, this_val), v=2)
 
-            # # checkpoint
-            # self.checkpoint_model(self.epoch, is_best=is_best)
-        #     return
+        # # checkpoint
+        # self.checkpoint_model(self.epoch, is_best=is_best)
+    #     return
     except:
         print("Exception caught, exiting gracefully")
     graceful_exit()

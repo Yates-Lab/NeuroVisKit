@@ -22,7 +22,7 @@ dirname = os.path.join(cwd, 'data')
 with open(os.path.join(dirname, 'session.pkl'), 'rb') as f:
     session = dill.load(f)
 cids = session['cids']
-folderName = 'changed_seed0'# 'goodmodel_20'
+folderName = 'shifter_20200304_0'# 'goodmodel_20'
 to_eval = True
 #%%
 train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val)
@@ -33,7 +33,9 @@ with open(os.path.join(dirname, folderName, 'model.pkl'), 'rb') as f:
 model.to(device)
 if to_eval:
     eval_model_summary(model, val_dl)
-core = model.core
+
+#%%
+core = model.model.core
 
 #%%
 loader = cycle(val_dl)
@@ -87,9 +89,10 @@ def gradSum_all(nsamples=1000, loss=True):
 def integratedGradients(n=25, neuron=None):
     model.zero_grad()
     X = nextX()
+    stim0 = deepcopy(X['stim'])
     for i in range(n):
-        x = deepcopy(X)
-        x["stim"] = x["stim"] * (i / n)
+        # x = deepcopy(X)
+        X["stim"] = stim0 * (i / n)
         y = model(X)
     if neuron == None:
         torch.mean(y).backward()
@@ -209,8 +212,79 @@ def getGradSummary(loss=True, sample_points=[1, 100, 1000, 10000], stability=Fal
 
 #%%
 plot_layer(core[0])
-plot_sta_movie(core[0].get_weights(), frameDelay=2, path=folderName+'.gif')
-getIntegratedGradSummary(nsamples=100)
+
+w = np.transpose(core[0].get_weights(), (2,0,1,3))
+w = np.concatenate((np.zeros( [1] + list(w.shape[1:])), w))
+plot_sta_movie(w, frameDelay=2, path=folderName+'.gif')
+
+#%%
+grads = getIntegratedGradSummary(nsamples=100)
+
+#%%
+
 getGradSummary(True)
 getGradSummary(False)
+# %%
+from models.utils import plot_stas
+plot_stas(np.transpose(grads[0], (2, 0, 1, 3)))
+
+#%%
+plot_stas(grads[1])
+# %%
+
+def plotTransients(stimid=0, maxsamples=120):
+    from tqdm import tqdm
+    sacinds = np.where( (val_data['fixation_onset'][:,0] * (val_data['stimid'][:,0]-stimid)**2) > 1e-7)[0]
+    nsac = len(sacinds)
+    data = val_data
+
+    print("Looping over %d saccades" %nsac)
+
+    NC = len(model.cids)
+    sta_true = np.nan*np.zeros((nsac, maxsamples, NC))
+    sta_hat = np.nan*np.zeros((nsac, maxsamples, NC))
+
+    for i in tqdm(range(len(sacinds)-1)):
+        
+        ii = sacinds[i]
+        jj = sacinds[i+1]
+        n = np.minimum(jj-ii, maxsamples)
+        iix = np.arange(ii, ii+n)
+        
+        sample = {key: data[key][iix,:] for key in ['stim', 'robs', 'dfs', 'eyepos']}
+
+        sta_hat[i,:n,:] = model(sample).detach().numpy()
+        sta_true[i,:n,:] = sample['robs'][:,model.cids].detach().numpy()
+
+    sx = int(np.ceil(np.sqrt(NC)))
+    sy = int(np.round(np.sqrt(NC)))
+
+    plt.figure(figsize=(sx*2, sy*2))
+    for cc in range(NC):
+        
+        plt.subplot(sx, sy, cc + 1)
+        _ = plt.plot(np.nanmean(sta_true[:,:,cc],axis=0), 'k')
+        _ = plt.plot(np.nanmean(sta_hat[:,:,cc],axis=0), 'r')
+        plt.axis("off")
+        plt.title(cc)
+
+    plt.show()
+
+    return sta_true, sta_hat
+
+sta_true, sta_hat = plotTransients()
+
+#%%
+
+
+cc = 37
+i += 1
+plt.plot(sta_true[i,:,cc], 'k')
+plt.plot(sta_hat[i,:,cc], 'r')
+
+
+    
+
+
+
 # %%

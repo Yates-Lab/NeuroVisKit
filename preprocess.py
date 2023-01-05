@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
     User-Defined Parameters
 '''
 sessname = '20200304'
-datadir = '/Data/stim_movies/'
+datadir = '/mnt/Data/Datasets/MitchellV1FreeViewing/stim_movies/' #'/Data/stim_movies/'
 batch_size = 1000
 
 #%%
@@ -48,7 +48,7 @@ ds = Pixel(datadir,
     valid_eye_rad=valid_eye_rad,
     spike_sorting='kilowf',
     fixations_only=False,
-    load_shifters=True,
+    load_shifters=False,
     covariate_requests={
         'fixation_onset': {'tent_ctrs': np.arange(-15, 60, 1)},
         'frame_tent': {'ntents': 40}}
@@ -152,3 +152,5 @@ session = {
 }
 with open(os.path.join(paths['data'], 'session.pkl'), 'wb') as f:
     dill.dump(session, f)
+
+#%%

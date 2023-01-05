@@ -14,10 +14,16 @@ from torch.utils.data import DataLoader
 import matplotlib
 import matplotlib.pyplot as plt
 from datasets.generic import GenericDataset
-from models.base import Encoder
 from train import train
 
 matplotlib.use('Agg')
+
+def seed_everything(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    os.environ['PYTHONHASHSEED']=str(seed)
+    torch.cuda.manual_seed(str(seed))
 
 def fig2np(fig):
     '''
@@ -241,34 +247,6 @@ class ModelGenerator:
                 return False
         print("ModelGenerator is being reproducible")
         return True
-
-class base(Encoder):
-
-    def __init__(self,
-        input_dims,
-        cids,
-        modifers):
-
-        super().__init__(input_dims, cids=cids, modifiers=modifers)
-
-        self.core = None
-        self.readout = None
-        self.name = 'base'
-        self.bias = torch.nn.Parameter(torch.zeros(len(cids)))
-        
-    def forward(self, data):
-
-        offset = self.offval
-    
-        for offmod,stim in zip(self.offsets, self.offsetstims):
-            offset = offset + offmod(data[stim])
-
-        offset += self.bias
-
-        return self.output_NL(offset)
-    
-    def compute_reg_loss(self):
-        return self.offval
 
 def initialize_gaussian_envelope( ws, w_shape):
     """

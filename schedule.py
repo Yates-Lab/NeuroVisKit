@@ -14,17 +14,17 @@ from ray.air.checkpoint import Checkpoint
 from ray.air import session
 import matplotlib
 from datasets.mitchell.pixel.utils import get_stim_list
-from models.cnns import CNNdense
-from utils import train_loop_org, unpickle_data, ModelGenerator, initialize_gaussian_envelope
+from models import CNNdense
+from utils import train_loop_org, unpickle_data, ModelGenerator, initialize_gaussian_envelope, seed_everything
 init_seed = 0
-np.random.seed(init_seed)
-random.seed(init_seed)
-torch.manual_seed(init_seed)
-os.environ['PYTHONHASHSEED']=str(init_seed)
-torch.cuda.manual_seed(str(init_seed))
+seed_everything(init_seed)
+
 intended_device = torch.device(
     'cuda:1' if torch.cuda.is_available() else 'cpu')
 print('Intended device: ', intended_device)
+
+%load_ext autoreload
+%autoreload 2
 
 #%%
 '''
@@ -187,3 +187,5 @@ if not test:
     print('Starting tuning.')
     results = tuner.fit()
     print(results)
+
+# %%
