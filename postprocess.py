@@ -22,12 +22,14 @@ dirname = os.path.join(cwd, 'data')
 with open(os.path.join(dirname, 'session.pkl'), 'rb') as f:
     session = dill.load(f)
 cids = session['cids']
-folderName = 'shifter_20200304_0'# 'goodmodel_20'
+# folderName = 'shifter_20200304_0_window_valid'# 'goodmodel_20'
+folderName = 'shifter_20200304_2_window_valid_long'
 to_eval = True
 #%%
 train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val)
 train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device, batch_size=1)
 
+#%%
 with open(os.path.join(dirname, folderName, 'model.pkl'), 'rb') as f:
     model = dill.load(f)
 model.to(device)
@@ -212,7 +214,7 @@ def getGradSummary(loss=True, sample_points=[1, 100, 1000, 10000], stability=Fal
 
 #%%
 plot_layer(core[0])
-
+#%%
 w = np.transpose(core[0].get_weights(), (2,0,1,3))
 w = np.concatenate((np.zeros( [1] + list(w.shape[1:])), w))
 plot_sta_movie(w, frameDelay=2, path=folderName+'.gif')
@@ -226,10 +228,10 @@ getGradSummary(True)
 getGradSummary(False)
 # %%
 from models.utils import plot_stas
-plot_stas(np.transpose(grads[0], (2, 0, 1, 3)))
+_ = plot_stas(np.transpose(grads[0], (2, 0, 1, 3)))
 
 #%%
-plot_stas(grads[1])
+_ = plot_stas(grads[1])
 # %%
 
 def plotTransients(stimid=0, maxsamples=120):
@@ -275,15 +277,17 @@ def plotTransients(stimid=0, maxsamples=120):
 sta_true, sta_hat = plotTransients()
 
 #%%
-
+i = 0
+#%%
 
 cc = 37
 i += 1
 plt.plot(sta_true[i,:,cc], 'k')
 plt.plot(sta_hat[i,:,cc], 'r')
 
-
-    
+#%%
+from utils import plot_model
+plot_model(model.model)
 
 
 

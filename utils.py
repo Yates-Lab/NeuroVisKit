@@ -123,10 +123,23 @@ def get_datasets(train_data, val_data, device=None, batch_size=1000):
     '''
         Get datasets from data files.
     '''
-    train_ds = GenericDataset(train_data, device)
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_ds = GenericDataset(val_data, device)
-    val_dl = DataLoader(val_ds, batch_size=batch_size)
+    # train_ds = GenericDataset(train_data, device)
+    # train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    # val_ds = GenericDataset(val_data, device)
+    # val_dl = DataLoader(val_ds, batch_size=batch_size)
+    train_ds = GenericDataset(train_data, device=device)
+    val_ds = GenericDataset(val_data, device=device) # we're okay with being slow
+
+    if train_ds.device.type=='cuda':
+        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    else:
+        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=os.cpu_count()//2)
+
+    if val_ds.device.type=='cuda':
+        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    else:
+        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=os.cpu_count()//2)
+
     return train_dl, val_dl, train_ds, val_ds
 
 
