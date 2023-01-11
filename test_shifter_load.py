@@ -1,4 +1,9 @@
 
+'''
+Test the output of the shifter once it's loaded by the dataset.
+Use preprocess_shifter.py to train the shifter for the session in question
+
+'''
 #%% Import Libraries
 import os
 import numpy as np
@@ -14,6 +19,7 @@ from datasets.mitchell.pixel.utils import get_stim_list
     User-Defined Parameters
 '''
 SESSION_NAME = '20200304'
+spike_sorting = 'kilowf'
 sesslist = list(get_stim_list().keys())
 assert SESSION_NAME in sesslist, "session name %s is not an available session" %SESSION_NAME
 
@@ -40,7 +46,7 @@ ds = Pixel(datadir,
     downsample_t=tdownsample,
     download=True,
     valid_eye_rad=valid_eye_rad,
-    spike_sorting='kilowf',
+    spike_sorting=spike_sorting,
     fixations_only=False,
     load_shifters=True,
     enforce_fixation_shift=True,
@@ -62,9 +68,9 @@ cids = np.where(ds.covariates['dfs'].sum(dim=0) / ds.covariates['dfs'].shape[0] 
 ds.crop_idx = [5,ds.dims[1]-5,5,ds.dims[2]-5]
 
 %matplotlib inline
-stas = ds.get_stas()
+stas0 = ds.get_stas()
 from models.utils import plot_stas
-_ = plot_stas(stas.detach().numpy())
+_ = plot_stas(stas0.detach().numpy())
 # %%
 ds = Pixel(datadir,
     sess_list=[SESSION_NAME],
@@ -73,7 +79,7 @@ ds = Pixel(datadir,
     downsample_t=tdownsample,
     download=True,
     valid_eye_rad=valid_eye_rad,
-    spike_sorting='kilowf',
+    spike_sorting=spike_sorting,
     fixations_only=False,
     load_shifters=True,
     enforce_fixation_shift=False,
@@ -95,7 +101,23 @@ cids = np.where(ds.covariates['dfs'].sum(dim=0) / ds.covariates['dfs'].shape[0] 
 ds.crop_idx = [5,ds.dims[1]-5,5,ds.dims[2]-5]
 
 %matplotlib inline
-stas = ds.get_stas()
+stas1 = ds.get_stas()
 from models.utils import plot_stas
-_ = plot_stas(stas.detach().numpy())
+
+_, bestlag = plot_stas(stas1.detach().numpy())
+cc = 0
+# %% compare the two corrections
+
+cc += 1
+if cc >= stas1.shape[-1]:
+    cc = 0
+plt.figure()
+plt.subplot(1,3,1)
+plt.imshow(stas0[bestlag[cc], :,:,cc], interpolation='none')
+plt.subplot(1,3,2)
+plt.imshow(stas1[bestlag[cc], :,:,cc], interpolation='none')
+plt.subplot(1,3,3)
+plt.imshow(stas1[bestlag[cc], :,:,cc]-stas0[bestlag[cc], :,:,cc],  interpolation='none')
+
+
 # %%
