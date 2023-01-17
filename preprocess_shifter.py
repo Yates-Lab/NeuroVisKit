@@ -10,14 +10,13 @@ import matplotlib.pyplot as plt
 import torch
 import dill
 from datasets.mitchell.pixel import Pixel
-from models.utils import plot_stas
 from datasets.mitchell.pixel.utils import get_stim_list
 
 #%%
 '''
     User-Defined Parameters
 '''
-SESSION_NAME = '20200304'
+SESSION_NAME = '20191206'
 spike_sorting = 'kilowf'
 sesslist = list(get_stim_list().keys())
 assert SESSION_NAME in sesslist, "session name %s is not an available session" %SESSION_NAME
@@ -26,7 +25,9 @@ datadir = '/mnt/Data/Datasets/MitchellV1FreeViewing/stim_movies/' #'/Data/stim_m
 batch_size = 1000
 window_size = 35
 num_lags = 24
-seed = 0
+seed = 1234
+overwrite = False
+retrain = False
 
 #%%
 # Process.
@@ -76,7 +77,9 @@ stas = ds.get_stas(inds=gab_inds, square=True)
 cids = np.intersect1d(cids, np.where(~np.isnan(stas.std(dim=(0,1,2))))[0])
 
 #%%
-maxsamples = 197144
+# maxsamples = 197144
+from NDNT.utils import get_max_samples
+maxsamples = get_max_samples(ds, train_device)
 train_inds, val_inds = ds.get_train_indices(max_sample=int(0.85*maxsamples))
 
 train_data = ds[train_inds]
@@ -90,130 +93,52 @@ cids = np.intersect1d(cids, np.where(stas.sum(dim=(0,1,2))>0)[0])
 input_dims = ds.dims + [ds.num_lags]
 
 #%% Put dataset on GPU
-from datasets import GenericDataset
-
-dataset_device = torch.device('cpu') #torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-train_ds = GenericDataset(train_data, device=train_device)
-val_ds = GenericDataset(val_data, device=dataset_device) # we're okay with being slow
-
-#%%
-NUM_WORKERS = os.cpu_count()//2
-from torch.utils.data import DataLoader
-batch_size = 1000
-if train_ds.device.type=='cuda':
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-else:
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=NUM_WORKERS)
-
-if val_ds.device.type=='cuda':
-    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
-else:
-    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=NUM_WORKERS)
-
-# from utils import get_datasets, seed_everything
-# train_dl, val_dl, _, _ = get_datasets(train_data, val_data, device=dataset_device, batch_size=batch_size)
+val_device = torch.device('cpu') # if you're cutting it close, put the validation set on the cpu
+from utils import get_datasets, seed_everything
+train_dl, val_dl, _, _ = get_datasets(train_data, val_data, device=train_device, val_device=val_device, batch_size=batch_size)
 
 #%% 
 from models import CNNdense, Shifter
-# import models.cnns as cnns
-# from models.shifters import Shifter
-# import torch.nn.functional as F
 from copy import deepcopy
 from NDNT.training import Trainer, EarlyStopping
+from NDNT.utils import load_model
 from utils import initialize_gaussian_envelope
 
-# def fit_cnn(input_dims, num_filters, filter_width, num_inh,
-#     model_type='CNNdense',
-#     name=None,
-#     fit=False,
-#     scaffold=None,
-#     shifter=True,
-#     early_stopping_patience=4,
-#     window=None,
-#     reg_core={'d2t': 1e-3, 'center': 1e-2, 'edge_t': .1},
-#     reg_hidden={'glocalx': 1e-1, 'd2x': 1e-4, 'center':1e-3},
-#     reg_readout={'l2': 1e-5},
-#     reg_vals_feat={'l1':0.01}):
-
-
-#     cr0 = cnns.__dict__[model_type](input_dims,
-#             num_subunits=num_filters,
-#             filter_width=filter_width,
-#             num_inh=num_inh,
-#             cids=cids,
-#             bias=False,
-#             scaffold=scaffold,
-#             is_temporal=False,
-#             batch_norm=True,
-#             window=window,
-#             norm_type=0,
-#             reg_core=reg_core,
-#             reg_hidden=reg_hidden,
-#             reg_readout=reg_readout,
-#             reg_vals_feat=reg_vals_feat,
-#                         )
-#             # modifiers = modifiers
-#     # cr0.name = name
-
-#     # cr0.bias.data = b0.bias.data.clone() #
-#     cr0.bias.data = torch.log(torch.exp(ds.covariates['robs'][:,cids].mean(dim=0)) - 1)
-
-#     w_centered = initialize_gaussian_envelope( cr0.core[0].get_weights(to_reshape=False), cr0.core[0].filter_dims)
-#     cr0.core[0].weight.data = torch.tensor(w_centered, dtype=torch.float32)
-
-#     cr0.prepare_regularization()
-
-#     print("Custom initialization complete")
-#     if shifter:
-#         smod = Shifter(cr0, affine=True)
-#     else:
-#         smod = deepcopy(cr0)
-
-#     optimizer = torch.optim.Adam(smod.parameters(), lr=0.001)
-
-#     earlystopping = EarlyStopping(patience=early_stopping_patience, verbose=False)
-
-#     trainer = Trainer(optimizer=optimizer,
-#         device = train_device,
-#         dirpath = os.path.join(dirname, NBname, smod.name),
-#         log_activations=False,
-#         early_stopping=earlystopping,
-#         verbose=2,
-#         max_epochs=100)
-
-#     # fit
-#     trainer.fit(smod, train_dl, val_dl)
-
-#     del trainer
-#     torch.cuda.empty_cache()
-
-#     return smod
 
 def fit_shifter_model(cp_dir, affine=False, overwrite=False):
-    from utils import train, memory_clear
+    from utils import memory_clear
 
+    # manually name the model
+    name = 'CNN_shifter'
     if affine:
-        cp_dir = cp_dir + '_affine'
+        name = name + '_affine'
     
-    if os.path.isdir(cp_dir) and not overwrite:
-        fpath = os.path.join(cp_dir, 'model.pkl')
-        if os.path.exists(fpath) and not overwrite:
-            model = dill.load(open(fpath, 'rb'))
-            model.to(dataset_device)
+    # load best model if it already exists
+    exists = os.path.isdir(os.path.join(cp_dir, name))
+    if exists and not overwrite:
+        try:
+            smod = load_model(cp_dir, name)
+
+            smod.to(dataset_device)
             val_loss_min = 0
             for data in val_dl:
-                val_loss_min += model.validation_step(data)
+                out = smod.validation_step(data)
+                val_loss_min += out['loss'].item()
 
             val_loss_min/=len(val_dl)    
-            return model, val_loss_min.item() 
+            return smod, val_loss_min
+        except:
+            pass
 
     os.makedirs(cp_dir, exist_ok=True)
 
-    max_epochs = 150
+    # parameters of architecture
     num_filters = [20, 20, 20, 20]
     filter_width = [11, 9, 7, 7]
     num_inh = [0]*len(num_filters)
     scaffold = [len(num_filters)-1]
+
+    # build CNN
     cr0 = CNNdense(input_dims,
             num_subunits=num_filters,
             filter_width=filter_width,
@@ -230,36 +155,33 @@ def fit_shifter_model(cp_dir, affine=False, overwrite=False):
             reg_readout={'glocalx':1},
             reg_vals_feat={'l1':0.01},
                         )
-        
+    
+    # initialize parameters
     cr0.bias.data = torch.log(torch.exp(ds.covariates['robs'][:,cids].mean(dim=0)) - 1)
     w_centered = initialize_gaussian_envelope( cr0.core[0].get_weights(to_reshape=False), cr0.core[0].filter_dims)
     cr0.core[0].weight.data = torch.tensor(w_centered, dtype=torch.float32)
+    
+    # build regularization modules
     cr0.prepare_regularization()
 
+    # wrap in a shifter network
     smod = Shifter(cr0, affine=affine)
+    smod.name = name
 
     optimizer = torch.optim.Adam(smod.parameters(), lr=0.001)
-    # val_loss_min = train(smod.to(train_device),
-    #         train_dl,
-    #         val_dl,
-    #         optimizer=optimizer,
-    #         max_epochs=max_epochs,
-    #         verbose=2,
-    #         checkpoint_path=cp_dir,
-    #         device=train_device,
-    #         patience=20)
     
+    # minimal early stopping patience is all we need here
     earlystopping = EarlyStopping(patience=3, verbose=False)
 
     trainer = Trainer(optimizer=optimizer,
         device = train_device,
-        dirpath = os.path.join(dirname, NBname, smod.name),
+        dirpath = os.path.join(cp_dir, smod.name),
         log_activations=False,
         early_stopping=earlystopping,
         verbose=2,
-        max_epochs=max_epochs)
+        max_epochs=100)
 
-    # fit
+    # fit and cleanup memory
     memory_clear()
     trainer.fit(smod, train_dl, val_dl)
     val_loss_min = deepcopy(trainer.val_loss_min)
@@ -268,44 +190,117 @@ def fit_shifter_model(cp_dir, affine=False, overwrite=False):
     
     return smod, val_loss_min
     
-# %%
+# %% fit shifter models
 from utils import seed_everything
-seed = 66
 NBname = f'shifter_{SESSION_NAME}_{seed}'
 cwd = os.getcwd()
 dirname = os.path.join(cwd, 'data')
 cp_dir = os.path.join(dirname, NBname)
 
+# fit shifter with translation only
 seed_everything(seed)
-mod0, loss0 = fit_shifter_model(cp_dir, affine=False, overwrite=False)
+mod0, loss0 = fit_shifter_model(cp_dir, affine=False, overwrite=retrain)
 
+# fit shifter with affine
 seed_everything(seed)
-mod1, loss1 = fit_shifter_model(cp_dir, affine=True, overwrite=False)
+mod1, loss1 = fit_shifter_model(cp_dir, affine=True, overwrite=retrain)
 
-# #%%
+# %%
+from models.utils import plot_stas, eval_model
 
-# # seed_everything(seed)
-# num_filters = [20, 20, 20, 20]
-# filter_width = [11, 9, 7, 7]
-# num_inh = [0]*len(num_filters)
-# scaffold = [len(num_filters)-1]
-# # mod0, loss0 = fit_shifter_model(cp_dir, affine=True, overwrite=True)
-# mod0 = fit_cnn(input_dims, num_filters, filter_width, num_inh,
-#         fit=True,
-#         model_type='CNNdense',
-#         scaffold=scaffold,
-#         window='hamming',
-#         early_stopping_patience=15,
-#         reg_core=None, #{'d2t': 1e-2, 'center': 1, 'glocalx': 1, 'edge_t': .1},
-#         reg_hidden=None, #{'glocalx': 1e-1, 'center':1e-3},
-#         reg_readout={'glocalx':1},
-#         reg_vals_feat={'l1':0.01},
-#         name='CNN3layerDense')
+ll0 = eval_model(mod0, val_dl)
+ll1 = eval_model(mod1, val_dl)
+# %%
+%matplotlib inline
+fig = plt.figure()
+plt.plot(ll0, ll1, '.')
+plt.plot(plt.xlim(), plt.xlim(), 'k')
+plt.title("LL")
+plt.xlabel("Translation shifter")
+plt.ylabel("Affine Shifter")
 
-# data = ds[:100]
-# mod0.training_step(data)
+plt.show()
+# %%
+mod1.model.core[0].plot_filters()
+# %%
+from datasets.mitchell.pixel.utils import plot_shifter
+_,fig00 = plot_shifter(mod0.shifter, show=False)
+_,fig01 = plot_shifter(mod1.shifter, show=False)
+# %% plot STAs before and after shifting
+iix = (train_data['stimid']==0).flatten()
+y = (train_data['robs'][iix,:]*train_data['dfs'][iix,:])/train_data['dfs'][iix,:].sum(dim=0).T
+stas = (train_data['stim'][iix,...].T@y).reshape(input_dims[1:] + [-1]).permute(2,0,1,3)
+
+_,_,fig02 =  plot_stas(stas.numpy(), title='no shift')
+
+# do shift correction
+shift = mod0.shifter(train_data['eyepos'])
+stas0 = (mod0.shift_stim(train_data['stim'], shift)[iix,...].T@y).reshape(input_dims[1:] + [-1]).permute(2,0,1,3)
+
+_,_,fig03 =  plot_stas(stas0.detach().numpy(), title='translation')
+
+shift = mod1.shifter(train_data['eyepos'])
+stas1 = (mod1.shift_stim(train_data['stim'], shift)[iix,...].T@y).reshape(input_dims[1:] + [-1]).permute(2,0,1,3)
+
+_,_,fig04 =  plot_stas(stas1.detach().numpy(), title='affine')
+
 
 #%%
+
+model = mod0
+
+def plotTransients(stimid=0, maxsamples=120):
+    from tqdm import tqdm
+    sacinds = np.where( (val_data['fixation_onset'][:,0] * (val_data['stimid'][:,0]-stimid)**2) > 1e-7)[0]
+    nsac = len(sacinds)
+    data = val_data
+
+    print("Looping over %d saccades" %nsac)
+
+    NC = len(model.cids)
+    sta_true = np.nan*np.zeros((nsac, maxsamples, NC))
+    sta_hat = np.nan*np.zeros((nsac, maxsamples, NC))
+
+    for i in tqdm(range(len(sacinds)-1)):
+        
+        ii = sacinds[i]
+        jj = sacinds[i+1]
+        n = np.minimum(jj-ii, maxsamples)
+        iix = np.arange(ii, ii+n)
+        
+        sample = {key: data[key][iix,:] for key in ['stim', 'robs', 'dfs', 'eyepos']}
+
+        sta_hat[i,:n,:] = model(sample).detach().numpy()
+        sta_true[i,:n,:] = sample['robs'][:,model.cids].detach().numpy()
+
+    sx = int(np.ceil(np.sqrt(NC)))
+    sy = int(np.round(np.sqrt(NC)))
+
+    fig = plt.figure(figsize=(sx*2, sy*2))
+    for cc in range(NC):
+        
+        plt.subplot(sx, sy, cc + 1)
+        _ = plt.plot(np.nanmean(sta_true[:,:,cc],axis=0), 'k')
+        _ = plt.plot(np.nanmean(sta_hat[:,:,cc],axis=0), 'r')
+        plt.axis("off")
+        plt.title(cc)
+
+    plt.show()
+
+    return sta_true, sta_hat, fig
+
+sta_true, sta_hat, fig05 = plotTransients()
+#%%
+from matplotlib.backends.backend_pdf import PdfPages
+filename = 'shifter_summary_%s_%d.pdf' %(SESSION_NAME, seed)
+p = PdfPages(filename)
+for fig in [fig, fig00, fig01, fig02, fig03, fig04, fig05]: 
+    fig.savefig(p, format='pdf') 
+      
+p.close()  
+
+#%% Save shifter output file
+
 from copy import deepcopy
 shifters = [mod0.shifter, mod1.shifter]
 shifter = deepcopy(shifters[np.argmin([loss0, loss1])])
@@ -324,45 +319,7 @@ out = {'cids': cids,
 fname = 'shifter_' + SESSION_NAME + '_' + ds.spike_sorting + '.p'
 fpath = os.path.join(datadir,fname)
 
-with open(fpath, 'wb') as f:
-    dill.dump(out, f)
-
-# # %%
-# from models.utils.general import eval_model
-# ll0 = eval_model(mod0, val_dl)
-# ll1 = eval_model(mod1, val_dl)
-# # %%
-# %matplotlib inline
-# plt.plot(ll0, ll1, '.')
-# plt.plot(plt.xlim(), plt.xlim(), 'k')
-# plt.show()
-# # %%
-# mod1.model.core[0].plot_filters()
-# # %%
-# from datasets.mitchell.pixel.utils import plot_shifter
-# _ = plot_shifter(mod0.shifter)
-# _ = plot_shifter(mod1.shifter)
-# # %%
-
-# iix = (train_data['stimid']==0).flatten()
-# y = (train_data['robs'][iix,:]*train_data['dfs'][iix,:])/train_data['dfs'][iix,:].sum(dim=0).T
-# stas = (train_data['stim'][iix,...].T@y).reshape(input_dims[1:] + [-1]).permute(2,0,1,3)
-
-# from models.utils import plot_stas
-# %matplotlib inline
-# _ =  plot_stas(stas.numpy())
-
-# shift = mod0.shifter(train_data['eyepos'])
-# shift[:,0] = shift[:,0] / input_dims[1] * 2
-# shift[:,1] = shift[:,1] / input_dims[2] * 2
-# stas0 = (mod0.shift_stim(train_data['stim'], shift)[iix,...].T@y).reshape(input_dims[1:] + [-1]).permute(2,0,1,3)
-
-# _ =  plot_stas(stas0.detach().numpy())
-
-# shift = mod1.shifter(train_data['eyepos'])
-# shift[:,0] = shift[:,0] / input_dims[1] * 2
-# shift[:,1] = shift[:,1] / input_dims[2] * 2
-# stas1 = (mod1.shift_stim(train_data['stim'], shift)[iix,...].T@y).reshape(input_dims[1:] + [-1]).permute(2,0,1,3)
-
-# _ =  plot_stas(stas1.detach().numpy())
-# # %%
+if not os.path.exists(fpath) or overwrite:
+    with open(fpath, 'wb') as f:
+        dill.dump(out, f)
+# %%

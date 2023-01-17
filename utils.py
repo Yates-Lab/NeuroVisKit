@@ -119,7 +119,7 @@ def unpickle_data(nsamples_train=None, nsamples_val=None, device="cpu"):
     return train_data_local, val_data_local
 
 
-def get_datasets(train_data, val_data, device=None, batch_size=1000):
+def get_datasets(train_data, val_data, device=None, val_device=None, batch_size=1000):
     '''
         Get datasets from data files.
     '''
@@ -128,7 +128,9 @@ def get_datasets(train_data, val_data, device=None, batch_size=1000):
     # val_ds = GenericDataset(val_data, device)
     # val_dl = DataLoader(val_ds, batch_size=batch_size)
     train_ds = GenericDataset(train_data, device=device)
-    val_ds = GenericDataset(val_data, device=device) # we're okay with being slow
+    if val_device is None:
+        val_device = device
+    val_ds = GenericDataset(val_data, device=val_device) # we're okay with being slow
 
     if train_ds.device.type=='cuda':
         train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
