@@ -23,7 +23,7 @@ torch.manual_seed(init_seed)
 os.environ['PYTHONHASHSEED']=str(init_seed)
 torch.cuda.manual_seed(str(init_seed))
 intended_device = torch.device(
-    'cuda:1' if torch.cuda.is_available() else 'cpu')
+    'cuda:0' if torch.cuda.is_available() else 'cpu')
 print('Intended device: ', intended_device)
 
 #%%
@@ -148,8 +148,10 @@ def test_objective(t_data, v_data, seed=None, name='checkpoint'):
     cp_dir = os.path.join(os.getcwd(), 'data', name)
     if not os.path.exists(cp_dir):
         os.mkdir(cp_dir)
-    print(train_loop_org(config_i, model_gen.get_model, t_data, v_data,
-                         fixational_inds=fix_inds, cids=cids, device=intended_device, checkpoint_dir=cp_dir, verbose=2, seed=seed))
+    val = train_loop_org(config_i, model_gen.get_model, t_data, v_data,
+                         fixational_inds=fix_inds, cids=cids, device=intended_device, checkpoint_dir=cp_dir, verbose=2, seed=seed)
+    print(val)
+    return val["score"]
 
 # %%
 # Load data.
@@ -159,9 +161,11 @@ train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val
 # Run.
 if test:
     try:
-        for i in range(100):
-            test_objective(train_data, val_data, seed=i, name=f'checkpoint_{i}')
+        test_objective(train_data, val_data)
+        # for i in range(100):
+        #     test_objective(train_data, val_data, seed=i, name=f'checkpoint_{i}')
     except Exception as e:
+        print("ERROR*****************************")
         print(e)
 if not test:
     trainable_with_data = tune.with_parameters(
