@@ -5,6 +5,13 @@ To clone, run:
 git clone --recurse-submodules git@github.com:VisNeuroLab/foundation.git
 ```
 
+Install Ray:
+```python3
+pip install -U "ray[default]"
+pip install -U "ray[air]"
+pip install -U "ray[tune]"
+```
+
 **For contributers:**
 
 * In the datasets submodule, checkout the branch "foundation" and ensure its up to date.

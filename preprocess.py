@@ -8,20 +8,21 @@ import dill
 from datasets.mitchell.pixel import Pixel
 from models.utils import plot_stas
 from datasets.mitchell.pixel.utils import get_stim_list
-from datasets.generic import GenericDataset
-from torch.utils.data import DataLoader
 
 #%%
 '''
     User-Defined Parameters
 '''
 sessname = '20200304'
-datadir = '/Data/stim_movies/'
+datadir = '/mnt/Data/Datasets/MitchellV1FreeViewing/stim_movies/' #'/Data/stim_movies/'
 batch_size = 1000
+window_size = 35
+num_lags = 24
+apply_shifter = False
 
 #%%
 # Process.
-device = torch.device('cuda')
+device = torch.device('cpu')
 dtype = torch.float32
 sesslist = list(get_stim_list().keys())
 NBname = 'shifter_{}'.format(sessname)
@@ -42,13 +43,13 @@ valid_eye_rad = 8
 ds = Pixel(datadir,
     sess_list=[sessname],
     requested_stims=['Gabor', 'BackImage'],
-    num_lags=24,
+    num_lags=num_lags,
     downsample_t=2,
     download=True,
     valid_eye_rad=valid_eye_rad,
     spike_sorting='kilowf',
     fixations_only=False,
-    load_shifters=True,
+    load_shifters=apply_shifter,
     covariate_requests={
         'fixation_onset': {'tent_ctrs': np.arange(-15, 60, 1)},
         'frame_tent': {'ntents': 40}}
@@ -69,29 +70,14 @@ nat_inds = np.where(np.in1d(ds.valid_idx, ds.stim_indices[ds.sess_list[0]]['Back
 FracDF_include = .2
 cids = np.where(ds.covariates['dfs'].sum(dim=0) / ds.covariates['dfs'].shape[0] > FracDF_include)[0]
 
+crop_window = ds.get_crop_window(inds=gab_inds, win_size=window_size, cids=cids, plot=True)
+ds.crop_idx = crop_window
+
 stas = ds.get_stas(inds=gab_inds, square=True)
 cids = np.intersect1d(cids, np.where(~np.isnan(stas.std(dim=(0,1,2))))[0])
 
-win_size = 35
-
-spatial_power = stas[...,cids].std(dim=0).nanmean(dim=2).numpy()
-ctr_y, ctr_x = np.where(spatial_power==np.max(spatial_power))
-
-x0 = int(ctr_x) - int(np.ceil(win_size/2))
-x1 = int(ctr_x) + int(np.floor(win_size/2))
-y0 = int(ctr_y) - int(np.ceil(win_size/2))
-y1 = int(ctr_y) + int(np.floor(win_size/2))
-
-plt.imshow(spatial_power)
-plt.plot(ctr_x, ctr_y, 'rx')
-plt.plot([x0,x1,x1,x0,x0], [y0,y0,y1,y1,y0], 'r')
-
-ds.crop_idx = [y0,y1,x0,x1]
 stas = ds.get_stas(inds=gab_inds, square=True)
-mu, bestlag = plot_stas(stas.detach().numpy()) 
-
-stas = ds.get_stas(inds=gab_inds, square=False)
-_ = plot_stas(stas.detach().numpy()) # plot stas
+mu, bestlag = plot_stas(stas.detach().numpy())
 
 sacta = ds.covariates['fixation_onset'].T@(ds.covariates['robs']*ds.covariates['dfs'])
 sacta /= ds.covariates['fixation_onset'].sum(dim=0)[:,None]
@@ -100,6 +86,7 @@ f = plt.plot(sacta.detach())
 
 train_inds, val_inds = ds.get_train_indices()#max_sample=int(0.85*maxsamples))
 
+#%%
 train_data = ds[train_inds]
 train_data['stim'] = torch.flatten(train_data['stim'], start_dim=1)
 val_data = ds[val_inds]
@@ -115,12 +102,6 @@ indsG = np.where(np.in1d(val_inds, gab_inds))[0]
 indsN = np.where(~np.in1d(val_inds, gab_inds))[0]
 
 print('{} training samples, {} validation samples, {} Gabor samples, {} Image samples'.format(len(train_inds), len(val_inds), len(indsG), len(indsN)))
-
-train_ds_cpu = GenericDataset(train_data, device) #, device=dataset_device)
-val_ds = GenericDataset(val_data, device) #, device=torch.device('cpu'))
-
-train_dl = DataLoader(train_ds_cpu, batch_size=batch_size, shuffle=True)
-val_dl = DataLoader(val_ds, batch_size=batch_size)
 
 cids = np.where(ds.covariates['dfs'].sum(dim=0) / ds.covariates['dfs'].shape[0] > FracDF_include)[0]
 cids = np.intersect1d(cids, np.where(stas.sum(dim=(0,1,2))>0)[0])
@@ -152,3 +133,5 @@ session = {
 }
 with open(os.path.join(paths['data'], 'session.pkl'), 'wb') as f:
     dill.dump(session, f)
+
+#%%
