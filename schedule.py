@@ -14,8 +14,8 @@ from ray.air.checkpoint import Checkpoint
 from ray.air import session
 import matplotlib
 from datasets.mitchell.pixel.utils import get_stim_list
-from models import CNNdense
-from utils import train_loop_org, unpickle_data, ModelGenerator, initialize_gaussian_envelope, seed_everything
+from models.cnns import CNNdense
+from utils.utils import train_loop_org, unpickle_data, ModelGenerator, initialize_gaussian_envelope, seed_everything
 init_seed = 0
 seed_everything(init_seed)
 

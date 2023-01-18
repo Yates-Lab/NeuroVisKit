@@ -1,4 +1,3 @@
-
 '''
 This script learns the shifter model for a particular session.
 Run this before running preprocess.
@@ -94,7 +93,7 @@ input_dims = ds.dims + [ds.num_lags]
 
 #%% Put dataset on GPU
 val_device = torch.device('cpu') # if you're cutting it close, put the validation set on the cpu
-from utils import get_datasets, seed_everything
+from utils.utils import get_datasets, seed_everything
 train_dl, val_dl, _, _ = get_datasets(train_data, val_data, device=train_device, val_device=val_device, batch_size=batch_size)
 
 #%% 
@@ -102,11 +101,11 @@ from models import CNNdense, Shifter
 from copy import deepcopy
 from NDNT.training import Trainer, EarlyStopping
 from NDNT.utils import load_model
-from utils import initialize_gaussian_envelope
+from utils.utils import initialize_gaussian_envelope
 
 
 def fit_shifter_model(cp_dir, affine=False, overwrite=False):
-    from utils import memory_clear
+    from utils.utils import memory_clear
 
     # manually name the model
     name = 'CNN_shifter'
@@ -191,7 +190,7 @@ def fit_shifter_model(cp_dir, affine=False, overwrite=False):
     return smod, val_loss_min
     
 # %% fit shifter models
-from utils import seed_everything
+from utils.utils import seed_everything
 NBname = f'shifter_{SESSION_NAME}_{seed}'
 cwd = os.getcwd()
 dirname = os.path.join(cwd, 'data')

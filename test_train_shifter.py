@@ -11,7 +11,7 @@ import torch
 import dill
 import matplotlib.pyplot as plt
 from datasets.mitchell.pixel.utils import get_stim_list
-from utils import unpickle_data, seed_everything
+from utils.utils import unpickle_data, seed_everything
 # import matplotlib
 # matplotlib.use('Agg')
 seed = 2
@@ -54,7 +54,7 @@ NC = len(cids)
 
 
 #%% get data loaders
-from utils import memory_clear, train, get_datasets
+from utils.utils import memory_clear, train, get_datasets
 from models import Shifter, CNNdense
 memory_clear()
 

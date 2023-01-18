@@ -8,9 +8,8 @@ import dill
 import os
 import math
 from copy import deepcopy
-from utils import unpickle_data, get_datasets, eval_model_summary, plot_layer
+from utils.utils import unpickle_data, get_datasets, eval_model_summary, plot_layer
 from models.utils.plotting import plot_sta_movie
-from datasets.mitchell.pixel.utils import get_stim_list
 from itertools import cycle
 import matplotlib.pyplot as plt
 %matplotlib inline
@@ -286,7 +285,7 @@ plt.plot(sta_true[i,:,cc], 'k')
 plt.plot(sta_hat[i,:,cc], 'r')
 
 #%%
-from utils import plot_model
+from utils.utils import plot_model
 plot_model(model.model)
 
 

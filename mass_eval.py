@@ -6,12 +6,8 @@ import torch
 import numpy as np
 import dill
 import os
-import math
 from copy import deepcopy
-from utils import unpickle_data, get_datasets, eval_model_summary, plot_layer, eval_model
-from models.utils.plotting import plot_sta_movie
-from datasets.mitchell.pixel.utils import get_stim_list
-from itertools import cycle
+from utils.utils import unpickle_data, get_datasets, eval_model
 import matplotlib.pyplot as plt
 device = torch.device("cpu") #torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 nsamples_train=10000

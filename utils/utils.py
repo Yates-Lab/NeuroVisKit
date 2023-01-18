@@ -13,11 +13,11 @@ import dill
 from torch.utils.data import DataLoader
 import matplotlib
 import matplotlib.pyplot as plt
-from datasets.generic import GenericDataset
-from train import train
+from utils.generic_dataset import GenericDataset
+from utils.train import train
 
 matplotlib.use('Agg')
-
+#%%
 def seed_everything(seed):
     np.random.seed(seed)
     random.seed(seed)
