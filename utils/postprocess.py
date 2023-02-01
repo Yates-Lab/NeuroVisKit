@@ -6,7 +6,7 @@ import math
 from copy import deepcopy
 from itertools import cycle
 import matplotlib.pyplot as plt
-import utils
+import utils.utils as utils
 
 def eval_model_dist(dirname, nsamples_train=None, nsamples_val=None, device=torch.device('cpu')):
     train_data, val_data = utils.unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val)
@@ -175,9 +175,10 @@ def plot_grads(grads):
     plt.ylabel('mag')
     plt.boxplot(grads)
     for i, gradi in enumerate(grads):
-        x = np.random.normal(i+1, 0.05, len(gradi))
+        x = np.random.normal(i, 0.05, len(gradi))
         plt.scatter(x, gradi, marker='x')
 
+    grads_sorted = np.sort(np.array(grads), axis=1)
     grads = [i / i.max() for i in grads]
     plt.subplot(rowNum, 2, 2)
     plt.title('per-layer normalization')
@@ -189,11 +190,19 @@ def plot_grads(grads):
         plt.scatter(x, gradi, marker='x')
 
     if rowNum == 2:
-        plt.subplot(2, 1, 2)
+        plt.subplot(4, 1, 3)
         plt.title('per-layer normalization')
         plt.ylabel('Layer')
-        plt.xlabel('Relative mag')
-        plt.imshow(grads, cmap='hot', interpolation='None', origin='lower')
+        plt.gca().set_xticks([])
+        grads_im = np.sort(np.array(grads), axis=1)
+        plt.imshow(grads_im, cmap='hot', interpolation='None', origin='lower')
+        plt.colorbar()
+
+        plt.subplot(4, 1, 4)
+        plt.title('global normalization')
+        plt.ylabel('Layer')
+        plt.gca().set_xticks([])
+        plt.imshow(grads_sorted/grads_sorted.max(), cmap='hot', interpolation='None', origin='lower')
         plt.colorbar()
 
     plt.tight_layout()

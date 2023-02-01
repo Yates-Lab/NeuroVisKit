@@ -32,7 +32,8 @@ BATCH_SIZE = 1000
 WINDOW_SIZE = 35
 NUM_LAGS = 24
 APPLY_SHIFTER = True
-TRAIN_SHIFTER = False
+TRAIN_SHIFTER = True
+TRAIN_FRAC = 0.85
 
 seed = 1234
 spike_sorting = 'kilowf'
@@ -60,7 +61,7 @@ if TRAIN_SHIFTER:
     stas, cids, gab_inds = utils.get_ds_analysis(ds, WINDOW_SIZE, FracDF_include)
 
     maxsamples = get_max_samples(ds, train_device)
-    train_data, val_data, train_inds, val_inds = utils.get_data_from_ds(ds, maxsamples, move_to_cpu=False)
+    train_data, val_data, train_inds, val_inds = utils.get_data_from_ds(ds, int(TRAIN_FRAC*maxsamples), move_to_cpu=False)
 
     cids = np.where(ds.covariates['dfs'].sum(dim=0) / ds.covariates['dfs'].shape[0] > FracDF_include)[0]
     cids = np.intersect1d(cids, np.where(stas.sum(dim=(0,1,2))>0)[0])
@@ -71,7 +72,7 @@ if TRAIN_SHIFTER:
     train_dl, val_dl, _, _ = get_datasets(train_data, val_data, device=train_device, val_device=val_device, batch_size=BATCH_SIZE)
 
     def fit_shifter_model(affine=False, overwrite=False):
-
+        seed_everything(seed)
         # manually name the model
         name = 'CNN_shifter'
         if affine:
@@ -98,7 +99,7 @@ if TRAIN_SHIFTER:
 
         # parameters of architecture
         num_filters = [20, 20, 20, 20]
-        filter_width = [11, 9, 7, 7]
+        filter_width = [11, 11, 11, 11]
         num_inh = [0]*len(num_filters)
         scaffold = [len(num_filters)-1]
 
@@ -155,11 +156,9 @@ if TRAIN_SHIFTER:
         return smod, val_loss_min
 
     # fit shifter with translation only
-    seed_everything(seed)
     mod0, loss0 = fit_shifter_model(affine=False, overwrite=True)
 
     # fit shifter with affine
-    seed_everything(seed)
     mod1, loss1 = fit_shifter_model(affine=True, overwrite=True)
 
     ll0 = eval_model(mod0, val_dl)

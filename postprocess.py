@@ -11,7 +11,7 @@ from models.utils import plot_stas
 import utils.postprocess as utils
 from models.utils.plotting import plot_sta_movie
 import matplotlib.pyplot as plt
-%matplotlib inline
+# %matplotlib inline
 device = torch.device("cpu") #torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 nsamples_train=10000
 nsamples_val=56643
@@ -52,8 +52,9 @@ w = core[0].get_weights()
 # w = (w - np.mean(w, axis=(0, 1, 2))) / np.std(w, axis=(0, 1, 2))
 # w = np.transpose(core[0].get_weights(), (2,0,1,3))
 # w = np.concatenate((np.zeros( [1] + list(w.shape[1:])), w))
-plot_sta_movie(w, frameDelay=1, path=folderName+'2D.gif')
-plot_sta_movie(w, frameDelay=1, path=folderName+'3D.gif', threeD=True)
+savePath = os.path.join(cwd, 'data', folderName)
+plot_sta_movie(w, frameDelay=1, path=savePath+'2D.gif')
+plot_sta_movie(w, frameDelay=1, path=savePath+'3D.gif', threeD=True)
 
 #%%
 grads = utils.get_integrated_grad_summary(model, core, loader, nsamples=100)
@@ -64,7 +65,7 @@ _ = plot_stas(np.transpose(grads[0], (2, 0, 1, 3)))
 _ = plot_stas(grads[1])
 # %%
 
-sta_true, sta_hat, _ = plot_transients()
+sta_true, sta_hat, _ = plot_transients(model, val_data)
 
 #%%
 i = 0

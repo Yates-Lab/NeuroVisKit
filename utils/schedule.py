@@ -5,11 +5,11 @@
 import os
 import random
 from time import sleep
-from copy import deepcopy
 import numpy as np
 import torch
 import matplotlib
 from utils.train import train
+from utils.utils import memory_clear, get_datasets, unpickle_data
 
 matplotlib.use('Agg')
 #%%
@@ -21,48 +21,6 @@ def fig2np(fig):
     np_data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
     np_data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     return np_data
-
-
-# def plot_transients(model, train_ds, fix_inds, cids):
-#     '''
-#         Plot transients for a given model, data, and fixational inds.
-#     '''
-#     nfix = len(fix_inds)
-#     ncids = len(cids)
-#     nbins = 120
-#     fig = plt.figure()
-#     org_device = train_ds.device
-
-#     plt.subplot(2, 1, 1)
-#     robs = torch.full((nfix, nbins, ncids), float('nan'), device='cpu')
-#     for ifix in range(nfix):
-#         items = min(len(fix_inds[ifix]), nbins)
-#         data = train_ds[fix_inds[ifix]]
-#         robs[ifix, :items, :] = data['robs'][:items, cids].detach().clone().cpu()
-#     print(np.prod(robs.shape).item()-torch.isnan(robs).sum())
-#     for cid_ind in range(ncids):
-#         plt.plot(np.nanmean(robs[:, :, cid_ind], axis=0))
-#     del robs
-#     # memory_clear()
-#     plt.subplot(2, 1, 2)
-#     robs = float('nan')*torch.ones((nfix, nbins, ncids))
-#     with torch.no_grad():
-#         for ifix in range(nfix):
-#             items = min(len(fix_inds[ifix]), nbins)
-#             data = train_ds[fix_inds[ifix]]
-#             data_dict = {}
-#             for key, val in data.items():
-#                 data_dict[key] = val[:items, ...].cpu()
-#             robs[ifix, :items, :] = model(data_dict)[:items, :]
-#             for key, val in data.items():
-#                 val[:items, ...].to(org_device)
-#     print(np.prod(robs.shape).item()-torch.isnan(robs).sum())
-#     for cid_ind in range(ncids):
-#         plt.plot(np.nanmean(robs[:, :, cid_ind], axis=0))
-#     del robs
-#     # memory_clear()
-#     return fig
-
 
 # def log_transients(model, train_ds, fix_inds, cids):
 #     '''
