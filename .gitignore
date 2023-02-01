@@ -3,3 +3,6 @@
 *.pkl
 data/*
 *__pycache__*
+*.gif
+*.txt
+*.pdf

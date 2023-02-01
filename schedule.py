@@ -3,19 +3,18 @@
 '''
 #%%
 import os
-import random
+import traceback
 import torch
 import dill
-import numpy as np
 import ray
 from ray import tune, air
 from ray.tune.search.ax import AxSearch
 from ray.air.checkpoint import Checkpoint
 from ray.air import session
-import matplotlib
-from datasets.mitchell.pixel.utils import get_stim_list
 from models.cnns import CNNdense
-from utils.utils import train_loop_org, unpickle_data, ModelGenerator, initialize_gaussian_envelope, seed_everything
+from models import ModelWrapper, CNNdense
+from utils.utils import initialize_gaussian_envelope, seed_everything, unpickle_data, memory_clear
+from utils.schedule import train_loop_org, ModelGenerator
 init_seed = 0
 seed_everything(init_seed)
 
@@ -23,8 +22,8 @@ intended_device = torch.device(
     'cuda:0' if torch.cuda.is_available() else 'cpu')
 print('Intended device: ', intended_device)
 
-%load_ext autoreload
-%autoreload 2
+# %load_ext autoreload
+# %autoreload 2
 
 #%%
 '''
@@ -32,7 +31,7 @@ print('Intended device: ', intended_device)
 '''
 test = True # Short test or full run.
 modify_tmp_dir = False # If low on space, can modify tmp dir to a different drive. This requires starting ray from command line to indicate the new tmp dir.
-RUN_NAME = 'foundation_run' # Name of log dir.
+RUN_NAME = 'shifter_run1' # Name of log dir.
 seed_model = 420
 nsamples_train=236452
 nsamples_val=56643
@@ -114,8 +113,9 @@ def get_model(config, device='cpu', dense=True):
         cr0.readout.mu.requires_grad = True
         cr0.readout.sigma.data.fill_(0.5)
         cr0.readout.sigma.requires_grad = True
-    cr0.prepare_regularization()
-    return cr0
+    model = ModelWrapper(cr0)
+    model.prepare_regularization()
+    return model
 
 model_gen = ModelGenerator(get_model, seed_model)
 
@@ -135,9 +135,10 @@ def test_objective(t_data, v_data, seed=None, name='checkpoint'):
         Test objective function for training.
     '''
     filts = [20, 20, 20, 20]
+    kerns = [11, 11, 11, 11]
     config_i = {
         **{f'num_filters{i}': filts[i] for i in range(4)},
-        **{f'filter_width{i}': 11 for i in range(4)},
+        **{f'filter_width{i}': kerns[i] for i in range(4)},
         'num_layers': 4,
         'max_epochs': 50,
         'd2x': 0.000001,
@@ -165,8 +166,9 @@ if test:
         # for i in range(100):
         #     test_objective(train_data, val_data, seed=i, name=f'checkpoint_{i}')
     except Exception as e:
-        print("ERROR*****************************")
-        print(e)
+        print("Exception caught:")
+        print(traceback.format_exc())
+        print("End of exception.")
 if not test:
     trainable_with_data = tune.with_parameters(
         train_loop, t_data=train_data, v_data=val_data)

@@ -6,6 +6,7 @@ import os
 import dill
 import numpy as np
 import torch
+import traceback
 from tqdm import tqdm  # progress bar
 from copy import deepcopy
 import matplotlib.pyplot as plt
@@ -118,13 +119,13 @@ def train(model,
         model.to("cpu")
         torch.cuda.empty_cache()
         if plot and len(train_scores) > 0:
-            print("attempted plot")
+            print("attempted plotting")
             plt.figure()
             plt.plot(np.arange(len(train_scores)), train_scores, label="Train Loss", c="b")
             plt.plot(np.arange(len(val_scores)), val_scores, label="Val Loss", c="r")
             plt.legend()
         else:
-            print("no plot", train_scores, val_scores, plot)
+            print("no plotting", train_scores, val_scores, plot)
         return model.eval()
 
     optimizer.zero_grad()
@@ -171,8 +172,10 @@ def train(model,
         # # checkpoint
         # self.checkpoint_model(self.epoch, is_best=is_best)
     #     return
-    except:
-        print("Exception caught, exiting gracefully")
+    except Exception as e:
+        print("Exception caught:")
+        print(traceback.format_exc())
+        print("End of exception, exiting gracefully.")
     graceful_exit()
     print(val_loss_min)
     return val_loss_min
