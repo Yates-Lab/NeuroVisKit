@@ -3,7 +3,7 @@
     Preprocess data for training models.
 '''
 #%% Imports
-import os
+import os, sys, getopt
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -24,17 +24,28 @@ from matplotlib.backends.backend_pdf import PdfPages
     User-Defined Parameters
 '''
 SESSION_NAME = '20200304'
+NUM_LAGS = 24
+TRAIN_SHIFTER = True
+
+if __name__ == "__main__":
+    argv = sys.argv[1:]
+    opts, args = getopt.getopt(argv,"t:s:l:",["train_shifter=", "session=", "lags="])
+    for opt, arg in opts:
+        if opt in ("-t", "--train_shifter"):
+            TRAIN_SHIFTER = arg.upper() == 'TRUE'
+        elif opt in ("-s", "--session"):
+            SESSION_NAME = arg
+        elif opt in ("-l", "--lags"):
+            NUM_LAGS = int(arg)
+
 DATADIR = [
     '/Data/stim_movies/',
     '/mnt/Data/Datasets/MitchellV1FreeViewing/stim_movies/'
     ][0]
-BATCH_SIZE = 1000
 WINDOW_SIZE = 35
-NUM_LAGS = 24
 APPLY_SHIFTER = True
-TRAIN_SHIFTER = True
 TRAIN_FRAC = 0.85
-
+batch_size = 1000
 seed = 1234
 spike_sorting = 'kilowf'
 device = torch.device('cpu')
@@ -69,7 +80,7 @@ if TRAIN_SHIFTER:
     input_dims = ds.dims + [ds.num_lags]
 
     #Put dataset on GPU
-    train_dl, val_dl, _, _ = get_datasets(train_data, val_data, device=train_device, val_device=val_device, batch_size=BATCH_SIZE)
+    train_dl, val_dl, _, _ = get_datasets(train_data, val_data, device=train_device, val_device=val_device, batch_size=batch_size)
 
     def fit_shifter_model(affine=False, overwrite=False):
         seed_everything(seed)

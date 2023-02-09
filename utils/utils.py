@@ -7,7 +7,7 @@ import torch
 import dill
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from utils.generic_dataset import GenericDataset
+from datasets.generic import GenericDataset
 from tqdm import tqdm
 
 def seed_everything(seed):

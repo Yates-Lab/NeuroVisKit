@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from datasets.mitchell.pixel import Pixel
 import matplotlib.pyplot as plt
 import torch
 

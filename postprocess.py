@@ -1,6 +1,7 @@
 '''
     Analysis of trained models.
 '''
+#TODO Make it spit out a PDF and also make it compatible with models that have nonuniform layers
 #%%
 import torch
 import numpy as np
@@ -41,9 +42,6 @@ if to_eval:
 
 #%%
 core = model.model.core
-
-#%%
-
 
 #%%
 utils.plot_layer(core[0])

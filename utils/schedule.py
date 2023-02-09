@@ -8,8 +8,9 @@ from time import sleep
 import numpy as np
 import torch
 import matplotlib
-from utils.train import train
-from utils.utils import memory_clear, get_datasets, unpickle_data
+import traceback
+from .train import train
+from .utils import memory_clear, get_datasets, unpickle_data
 
 matplotlib.use('Agg')
 #%%
@@ -136,3 +137,53 @@ class ModelGenerator:
         return True
 
 # %%
+
+def get_train_loop(model_gen, cids, fix_inds, session, Checkpoint):
+    '''
+        Get a train loop that is reproducible.
+    '''
+    def train_loop(config, t_data=None, v_data=None):
+        '''
+            Train loop for a given config with checkpointing.
+        '''
+        cp_dir = os.path.join(os.getcwd(), 'checkpoint')
+        os.mkdir(cp_dir)
+        out = train_loop_org(config, model_gen.get_model, t_data, v_data,
+                            fixational_inds=fix_inds, cids=cids, checkpoint_dir=cp_dir)
+        session.report(out, checkpoint=Checkpoint.from_directory(cp_dir))
+        return out
+    return train_loop
+
+# for i in range(100):
+#     test_objective(train_data, val_data, seed=i, name=f'checkpoint_{i}')
+def get_test_objective(model_gen, cids, fix_inds, session, Checkpoint, intended_device):
+    def test_objective(t_data, v_data, seed=None, name='checkpoint'):
+        '''
+            Test objective function for training.
+        '''
+        try:
+            filts = [20, 20, 20, 20]
+            kerns = [11, 11, 11, 11]
+            config_i = {
+                **{f'num_filters{i}': filts[i] for i in range(4)},
+                **{f'filter_width{i}': kerns[i] for i in range(4)},
+                'num_layers': 4,
+                'max_epochs': 50,
+                'd2x': 0.000001,
+                'd2t': 1e-2,
+                'center': 1e-2,
+                'edge_t': 1e-1,
+            }
+            cp_dir = os.path.join(os.getcwd(), 'data', name)
+            if not os.path.exists(cp_dir):
+                os.mkdir(cp_dir)
+            val = train_loop_org(config_i, model_gen.get_model, t_data, v_data,
+                                fixational_inds=fix_inds, cids=cids, device=intended_device, checkpoint_dir=cp_dir, verbose=2, seed=seed)
+            print(val)
+        except Exception as e:
+            print("Exception caught:")
+            print(traceback.format_exc())
+            print("End of exception.")
+            return
+        return val["score"]
+    return test_objective

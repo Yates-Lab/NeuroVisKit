@@ -6,7 +6,7 @@ import math
 from copy import deepcopy
 from itertools import cycle
 import matplotlib.pyplot as plt
-import utils.utils as utils
+from . import utils
 
 def eval_model_dist(dirname, nsamples_train=None, nsamples_val=None, device=torch.device('cpu')):
     train_data, val_data = utils.unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val)
@@ -381,3 +381,4 @@ def eval_model_summary(model, valid_dl):
     plt.title("Model performance")
     # Show plot
     plt.show()
+    return ev

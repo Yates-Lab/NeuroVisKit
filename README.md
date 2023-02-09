@@ -12,6 +12,11 @@ pip install -U "ray[air]"
 pip install -U "ray[tune]"
 ```
 
+To pull, run:
+```console
+git pull --recurse-submodules
+```
+
 **For contributers:**
 
 * In the datasets submodule, checkout the branch "foundation" and ensure its up to date.
