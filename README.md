@@ -17,6 +17,9 @@ To pull, run:
 git pull --recurse-submodules
 ```
 
+*make sure to modify your datadir in preprocess.py
+
+
 **For contributers:**
 
 * In the datasets submodule, checkout the branch "foundation" and ensure its up to date.

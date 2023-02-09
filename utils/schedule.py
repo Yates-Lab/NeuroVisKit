@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import matplotlib
 import traceback
-from .train import train
+from .trainer import train
 from .utils import memory_clear, get_datasets, unpickle_data
 
 matplotlib.use('Agg')

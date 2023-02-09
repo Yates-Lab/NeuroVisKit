@@ -208,7 +208,7 @@ if TRAIN_SHIFTER:
     model = mod0
 
     sta_true, sta_hat, fig05 = plot_transients(model, val_data)
-    filename = 'shifter_summary_%s_%d.pdf' %(SESSION_NAME, seed)
+    filename = os.path.join(dirname, 'shifter_summary_%s_%d.pdf' %(SESSION_NAME, seed))
     p = PdfPages(filename)
     for fig in [fig, fig00, fig01, fig02, fig03, fig04, fig05]: 
         fig.savefig(p, format='pdf') 
