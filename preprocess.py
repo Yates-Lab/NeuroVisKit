@@ -265,6 +265,17 @@ input_dims = ds.dims + [ds.num_lags]
 mean_robs = ds.covariates['robs'][:,cids].mean(dim=0)
 
 # Store data and get dict of paths.
+with open(os.path.join(dirname, 'metadata.txt'), 'w') as f:
+    f.write(f'Session: {SESSION_NAME};\n\
+            num_lags: {NUM_LAGS};\n\
+            train_shifter: {TRAIN_SHIFTER};\n\
+            apply_shifter: {APPLY_SHIFTER};\n\
+            window_size: {WINDOW_SIZE};\n\
+            frac_df_include: {FracDF_include};\n\
+            num_neurons: {len(cids)};\n\
+            num_train: {len(train_inds)};\n\
+            num_val: {len(val_inds)};\n\
+            train_frac: {TRAIN_FRAC};\n')
 paths = utils.store_data(train_data, val_data, cwd=cwd)
 
 #%% Get fixation indices.
