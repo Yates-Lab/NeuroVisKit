@@ -19,7 +19,7 @@ print('Intended device: ', device)
     User-Defined Parameters
 '''
 RUN_NAME = 'test' # Name of log dir.
-seed_model = 420
+seed = 420
 nsamples_train=236452
 nsamples_val=56643
 overwrite = False
@@ -37,7 +37,7 @@ if __name__ == "__main__":
         if opt in ("-n", "--name"):
             RUN_NAME = arg
         elif opt in ("-s", "--seed"):
-            seed_model = int(arg)
+            seed = int(arg)
         elif opt in ("-c", "--config"):
             config = json.loads(arg)
         elif opt == "--train":
@@ -70,6 +70,6 @@ train_dl, val_dl, train_ds, _ = get_datasets(train_data, val_data, device=device
 #%%
 # Train model.
 memory_clear()
-model = MODEL_DICT(config)
+model = MODEL_DICT[config['model']](config, seed, cids, input_dims, device)
 trainer = TRAINER_DICT[config['trainer']]
 best_val_loss = trainer(model, train_dl, val_dl, checkpoint_dir, device)
