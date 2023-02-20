@@ -1,3 +1,4 @@
+#%%
 import dill
 import os
 import torch
@@ -7,6 +8,35 @@ from copy import deepcopy
 from itertools import cycle
 import matplotlib.pyplot as plt
 from . import utils
+
+class Loader():
+    def __init__(self, ds, cyclic=True, shuffled=False):
+        self.ds = ds
+        self.inds = np.arange(len(ds))
+        if shuffled:
+            np.random.shuffle(self.inds)
+        self.iter = cycle if cyclic else iter
+        self.loader = self.iter(self.inds)
+    def __next__(self):
+        return self.ds[next(self.loader)]
+    def reset(self):
+        self.loader = self.iter(self.inds)
+
+class Grad():
+    def __init__(self, grads):
+        self.grads = grads
+    def __getitem__(self, key):
+        return self.grads[key]
+    def abs(self):
+        return Grad([g.abs() for g in self.grads])    
+    def __div__(self, other):
+        return Grad([g/other for g in self.grads])
+    def __mul__(self, other):
+        return Grad([g*other for g in self.grads])
+    def __add__(self, other):
+        return Grad([g+other for g in self.grads])
+    def __sub__(self, other):
+        return Grad([g-other for g in self.grads])
 
 def eval_model_dist(dirname, nsamples_train=None, nsamples_val=None, device=torch.device('cpu')):
     train_data, val_data = utils.unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val)
@@ -88,17 +118,6 @@ def plot_model_dist(dirname):
 
     return evals
 
-class Loader():
-    def __init__(self, dl, cycle=True):
-        self.dl = dl
-        self.loader = None
-        self.cycle = cycle
-        self.reset()
-    def __next__(self):
-        return next(self.loader)
-    def reset(self):
-        self.loader = cycle(self.dl) if cycle else iter(self.dl)
-
 def next_XY(loader, cids):
     x = next(loader)
     return x, x['robs'][..., cids]
@@ -178,7 +197,7 @@ def plot_grads(grads):
         x = np.random.normal(i, 0.05, len(gradi))
         plt.scatter(x, gradi, marker='x')
 
-    grads_sorted = np.sort(np.array(grads), axis=1)
+    grads_sorted = [np.sort(i, axis=0) for i in grads]
     grads = [i / i.max() for i in grads]
     plt.subplot(rowNum, 2, 2)
     plt.title('per-layer normalization')
@@ -194,7 +213,7 @@ def plot_grads(grads):
         plt.title('per-layer normalization')
         plt.ylabel('Layer')
         plt.gca().set_xticks([])
-        grads_im = np.sort(np.array(grads), axis=1)
+        grads_im = [np.sort(i, axis=0) for i in grads]
         plt.imshow(grads_im, cmap='hot', interpolation='None', origin='lower')
         plt.colorbar()
 
@@ -202,7 +221,8 @@ def plot_grads(grads):
         plt.title('global normalization')
         plt.ylabel('Layer')
         plt.gca().set_xticks([])
-        plt.imshow(grads_sorted/grads_sorted.max(), cmap='hot', interpolation='None', origin='lower')
+        mx = max([i.max() for i in grads_sorted])
+        plt.imshow([i/mx for i in grads_sorted], cmap='hot', interpolation='None', origin='lower')
         plt.colorbar()
 
     plt.tight_layout()
@@ -239,23 +259,23 @@ def get_grad_summary(model, core, loader, device, cids, loss=True, sample_points
         plt.ylim(0, 1)
     plt.tight_layout()
 
-    #TODO Check this
-    if stability:
-        stab_per_layer = [[] for i in range(len(stability[0]))]
-        for i in range(1, len(stability)):
-            diff = [stability[i][layer] - stability[i-1][layer] for layer in range(len(stability[i]))]
-            for layer in range(len(diff)):
-                stab_per_layer[layer].append(np.abs(diff[layer]).mean())
-        plt.figure()
-        plt.suptitle('Gradient Stability (entire units)')
-        for i, layer in enumerate(stab_per_layer):
-            plt.subplot(sx, sy, i + 1)
-            plt.stem(layer)
-            plt.title(f'layer {i}')
-            plt.xlabel('sample points (log scale)')
-            plt.ylabel('frac changed grads')
-            plt.ylim(0, 1)
-        plt.tight_layout()
+    # #TODO Check this
+    # if stability:
+    #     stab_per_layer = [[] for i in range(len(stability[0]))]
+    #     for i in range(1, len(stability)):
+    #         diff = [stability[i][layer] - stability[i-1][layer] for layer in range(len(stability[i]))]
+    #         for layer in range(len(diff)):
+    #             stab_per_layer[layer].append(np.abs(diff[layer]).mean())
+    #     plt.figure()
+    #     plt.suptitle('Gradient Stability (entire units)')
+    #     for i, layer in enumerate(stab_per_layer):
+    #         plt.subplot(sx, sy, i + 1)
+    #         plt.stem(layer)
+    #         plt.title(f'layer {i}')
+    #         plt.xlabel('sample points (log scale)')
+    #         plt.ylabel('frac changed grads')
+    #         plt.ylim(0, 1)
+    #     plt.tight_layout()
 
 def plot_layer(layer, ind=None):
     
@@ -382,3 +402,4 @@ def eval_model_summary(model, valid_dl):
     # Show plot
     plt.show()
     return ev
+# %%

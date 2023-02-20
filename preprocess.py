@@ -27,6 +27,7 @@ SESSION_NAME = '20200304'
 NUM_LAGS = 24
 TRAIN_SHIFTER = True
 
+
 if __name__ == "__main__":
     argv = sys.argv[1:]
     opts, args = getopt.getopt(argv,"t:s:l:",["train_shifter=", "session=", "lags="])
