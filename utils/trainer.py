@@ -172,7 +172,7 @@ def train(model,
         # # checkpoint
         # self.checkpoint_model(self.epoch, is_best=is_best)
     #     return
-    except Exception as e:
+    except (KeyboardInterrupt, Exception):
         print("Exception caught:")
         print(traceback.format_exc())
         print("End of exception, exiting gracefully.")

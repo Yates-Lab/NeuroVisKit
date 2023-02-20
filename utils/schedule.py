@@ -40,8 +40,6 @@ def train_loop_org(config,
                    get_model,
                    train_data=None,
                    val_data=None,
-                   fixational_inds=None,
-                   cids=None,
                    device=None,
                    checkpoint_dir=None,
                    verbose=1,
@@ -52,7 +50,7 @@ def train_loop_org(config,
     '''
     device = torch.device(device if device else "cuda")
     memory_clear()
-    model = get_model(config, device, seed)
+    model = get_model(config, device)
     if not train_data or not val_data:
         print("Ray dataset not working. Falling back on pickled dataset.")
         train_data, val_data = unpickle_data(device=device)
@@ -138,7 +136,7 @@ class ModelGenerator:
 
 # %%
 
-def get_train_loop(model_gen, cids, fix_inds, session, Checkpoint):
+def get_train_loop(get_model, session, Checkpoint):
     '''
         Get a train loop that is reproducible.
     '''
@@ -148,26 +146,23 @@ def get_train_loop(model_gen, cids, fix_inds, session, Checkpoint):
         '''
         cp_dir = os.path.join(os.getcwd(), 'checkpoint')
         os.mkdir(cp_dir)
-        out = train_loop_org(config, model_gen.get_model, t_data, v_data,
-                            fixational_inds=fix_inds, cids=cids, checkpoint_dir=cp_dir)
+        out = train_loop_org(config, get_model, t_data, v_data,
+                             checkpoint_dir=cp_dir)
         session.report(out, checkpoint=Checkpoint.from_directory(cp_dir))
         return out
     return train_loop
 
 # for i in range(100):
 #     test_objective(train_data, val_data, seed=i, name=f'checkpoint_{i}')
-def get_test_objective(model_gen, cids, fix_inds, session, Checkpoint, intended_device):
+def get_test_objective(get_model, session, Checkpoint, intended_device):
     def test_objective(t_data, v_data, seed=None, name='checkpoint'):
         '''
             Test objective function for training.
         '''
         try:
-            filts = [20, 20, 20, 20]
-            kerns = [11, 11, 11, 11]
             config_i = {
-                **{f'num_filters{i}': filts[i] for i in range(4)},
-                **{f'filter_width{i}': kerns[i] for i in range(4)},
-                'num_layers': 4,
+                'filters': [20, 20, 20, 20],
+                'kernels': [11, 11, 11, 11],
                 'max_epochs': 50,
                 'd2x': 0.000001,
                 'd2t': 1e-2,
@@ -177,8 +172,8 @@ def get_test_objective(model_gen, cids, fix_inds, session, Checkpoint, intended_
             cp_dir = os.path.join(os.getcwd(), 'data', name)
             if not os.path.exists(cp_dir):
                 os.mkdir(cp_dir)
-            val = train_loop_org(config_i, model_gen.get_model, t_data, v_data,
-                                fixational_inds=fix_inds, cids=cids, device=intended_device, checkpoint_dir=cp_dir, verbose=2, seed=seed)
+            val = train_loop_org(config_i, get_model, t_data, v_data,
+                                device=intended_device, checkpoint_dir=cp_dir, verbose=2, seed=seed)
             print(val)
         except Exception as e:
             print("Exception caught:")

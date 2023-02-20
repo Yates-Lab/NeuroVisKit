@@ -12,7 +12,7 @@ from ray.air.checkpoint import Checkpoint
 from ray.air import session
 from utils.utils import seed_everything, unpickle_data
 from utils.schedule import ModelGenerator, get_train_loop, get_test_objective
-from utils.get_models import get_cnn
+from utils.get_models import get_model
 init_seed = 0
 seed_everything(init_seed)
 
@@ -59,12 +59,15 @@ dirname = os.path.join(cwd, 'data')
 logdir = os.path.join(dirname, 'tensorboard')
 with open(os.path.join(dirname, 'session.pkl'), 'rb') as f:
     session = dill.load(f)
-cids, input_dims, mu, fix_inds = session['cids'], session['input_dims'], session['mu'], session['fix_inds']
-fix_inds = fix_inds
-NC = len(cids)
-
-get_model = get_cnn(input_dims, cids, NC, mu)
-
+    
+config = {
+    'model': 'CNNdense',
+    'cids': session['cids'],
+    'input_dims': session['input_dims'],
+    'mu': session['mu'],
+    'fix_inds': session['fix_inds'],
+    'seed': seed_model,
+}
 search_space = {
     **{f'num_filters{i}': tune.qrandint(1, 32, 2) for i in range(4)},
     **{f'filter_width{i}': tune.qrandint(3, 17, 2) for i in range(4)},
@@ -76,9 +79,9 @@ search_space = {
     'edge_t': tune.qloguniform(1e-4, 1e-1, 5e-5),
 }
 
-model_gen = ModelGenerator(get_model, seed_model)
-train_loop = get_train_loop(model_gen, cids, fix_inds, session, Checkpoint)
-test_objective = get_test_objective(model_gen, cids, fix_inds, session, Checkpoint, intended_device)
+model_gen = get_model(config, factory=True)
+train_loop = get_train_loop(model_gen, session, Checkpoint)
+test_objective = get_test_objective(model_gen, session, Checkpoint, intended_device)
 
 # %%
 # Load data.
