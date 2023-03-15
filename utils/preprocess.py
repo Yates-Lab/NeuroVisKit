@@ -38,13 +38,12 @@ def get_data_from_ds(ds, maxsamples=None, move_to_cpu=True):
 
     return train_data, val_data, train_inds, val_inds
 
-def store_data(train_data, val_data, cwd=None):
+def store_data(train_data, val_data, path=None):
     path_names = ['data', 'train_dir', 'val_dir', 'log_dir']
     paths = {
-        'data': os.path.join(cwd, 'data'),
-        'train_dir': os.path.join(cwd, 'data', 'train'),
-        'val_dir': os.path.join(cwd, 'data', 'val'),
-        'log_dir': os.path.join(cwd, 'data', 'tensorboard')
+        'data': path,
+        'train_dir': os.path.join(path, 'train'),
+        'val_dir': os.path.join(path, 'val'),
     }
     for i in path_names:
         if not os.path.exists(paths[i]):
@@ -69,6 +68,7 @@ def get_ds(Pixel, datadir, session_name, num_lags, spike_sorting='kilowf', load_
         spike_sorting=spike_sorting,
         fixations_only=False,
         load_shifters=load_shifters,
+        # enforce_fixation_shift=False,
         covariate_requests={
             'fixation_onset': {'tent_ctrs': np.arange(-15, 60, 1)},
             'frame_tent': {'ntents': 40}}

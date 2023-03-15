@@ -1,5 +1,6 @@
 import os
 import gc
+import time
 import random
 from copy import deepcopy
 import numpy as np
@@ -9,6 +10,31 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from datasets.generic import GenericDataset
 from tqdm import tqdm
+
+class TimeLogger():
+    def __init__(self):
+        self.timer = time.time()
+    def reset(self):
+        self.timer = time.time()
+    def log(self, msg):
+        print(f'{msg} {(time.time() - self.timer):.1f}s')
+        self.timer = time.time()
+        
+def plot_stim(stim, fig=None, title=None, subplot_shape=(1, 1)):
+    if fig is None:
+        plt.figure()
+    if title is not None:
+        plt.title(title)
+    c = int(np.ceil(np.sqrt(stim.shape[-1])))
+    r = int(np.ceil(stim.shape[-1] / c))
+    for i in range(stim.shape[-1]):
+        ind = (i%c) + (i//c)*c*subplot_shape[1]
+        plt.subplot(r*subplot_shape[0],c*subplot_shape[1],ind+1)
+        plt.imshow(stim[..., i], vmin=stim.min(), vmax=stim.max())
+        plt.gca().set_xticks([])
+        plt.gca().set_yticks([])
+    plt.tight_layout()
+    return fig
 
 def seed_everything(seed):
     np.random.seed(seed)
@@ -51,7 +77,7 @@ def initialize_gaussian_envelope( ws, w_shape):
                 wx = np.einsum('abcde, d->abcde', wx, genv)
     return np.reshape(wx, [-1, nfilt])
 
-def get_datasets(train_data, val_data, device=None, val_device=None, batch_size=1000):
+def get_datasets(train_data, val_data, device=None, val_device=None, batch_size=1000, force_shuffle=False):
     '''
         Get datasets from data files.
     '''
@@ -69,20 +95,22 @@ def get_datasets(train_data, val_data, device=None, val_device=None, batch_size=
     else:
         train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=os.cpu_count()//2)
 
+    to_shuffle = False or force_shuffle
     if val_ds.device.type=='cuda':
-        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=to_shuffle)
     else:
-        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, pin_memory=True, num_workers=os.cpu_count()//2)
+        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=to_shuffle, pin_memory=True, num_workers=os.cpu_count()//2)
 
     return train_dl, val_dl, train_ds, val_ds
 
-def unpickle_data(nsamples_train=None, nsamples_val=None, device="cpu"):
+def unpickle_data(nsamples_train=None, nsamples_val=None, device="cpu", path=None):
     '''
         Get training and validation data from pickled files and place on device.
     '''
-    cwd = os.getcwd()
-    train_path = os.path.join(cwd, 'data', 'train')
-    train_data_local = {}
+    path = os.path.join(os.getcwd(), 'data') if path is None else path
+    train_path = os.path.join(path, 'train')
+    val_path = os.path.join(path, 'val')
+    train_data_local, val_data_local = {}, {}
     num_samples = [None, None]
     for file in os.listdir(train_path):
         loaded = torch.load(os.path.join(train_path, file), map_location=device)
@@ -91,8 +119,6 @@ def unpickle_data(nsamples_train=None, nsamples_val=None, device="cpu"):
                          ] = loaded[:nsamples_train].clone()
         del loaded
         memory_clear()
-    val_path = os.path.join(cwd, 'data', 'val')
-    val_data_local = {}
     for file in os.listdir(val_path):
         loaded = torch.load(os.path.join(val_path, file), map_location=device)
         num_samples[1] = loaded.shape[0]
@@ -115,6 +141,45 @@ def load_model(checkpoint_path, model):
     return model
 
 def plot_transients(model, val_data, stimid=0, maxsamples=120):
+    sacinds = torch.where( (val_data['fixation_onset'][:,0] * (val_data['stimid'][:,0]-stimid)**2) > 1e-7)[0]
+    nsac = len(sacinds)
+    data = val_data
+
+    print("Looping over %d saccades" %nsac)
+
+    NC = len(model.cids)
+    sta_true = torch.nan*torch.zeros((nsac, maxsamples, NC))
+    sta_hat = torch.nan*torch.zeros((nsac, maxsamples, NC))
+
+    for i in tqdm(range(len(sacinds)-1)):
+        
+        ii = sacinds[i]
+        jj = sacinds[i+1]
+        n = min(jj-ii, maxsamples)
+        iix = torch.arange(ii, ii+n)
+        
+        sample = {key: data[key][iix,:] for key in ['stim', 'robs', 'dfs', 'eyepos']}
+
+        sta_hat[i,:n,:] = model(sample)
+        sta_true[i,:n,:] = sample['robs'][:,model.cids]
+
+    sx = int(np.ceil(np.sqrt(NC)))
+    sy = int(np.round(np.sqrt(NC)))
+
+    fig = plt.figure(figsize=(sx*2, sy*2))
+    for cc in range(NC):
+        
+        plt.subplot(sx, sy, cc + 1)
+        _ = plt.plot(torch.nanmean(sta_true[:,:,cc],axis=0).cpu().detach(), 'k')
+        _ = plt.plot(torch.nanmean(sta_hat[:,:,cc],axis=0).cpu().detach(), 'r')
+        plt.axis("off")
+        plt.title(cc)
+
+    plt.show()
+
+    return sta_true, sta_hat, fig
+
+def plot_transients_np(model, val_data, stimid=0, maxsamples=120):
     sacinds = np.where( (val_data['fixation_onset'][:,0] * (val_data['stimid'][:,0]-stimid)**2) > 1e-7)[0]
     nsac = len(sacinds)
     data = val_data

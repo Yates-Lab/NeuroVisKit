@@ -1,12 +1,52 @@
 #%%
 import numpy as np
+from copy import deepcopy
 import matplotlib.pyplot as plt
+from utils.utils import plot_stim
 import torch
 
-def generate_noise(N, type='white'):
+def irf(inp, model, cids, plot=False, shape=(35, 35, 24)):
     '''
-        Generate 2D noise with dim (N, N).
+        Generate the instantaneous receptive field for a given input and neuron/s.
+
+        inp: input dictionary
+        cids: list of neuron ids
+        shape: shape of the input for plotting
     '''
+    inp["stim"].requires_grad_()
+    model.zero_grad()
+    # Get the current prediction
+    pred = model(inp)
+    #identify relevant neurons
+    out = pred[..., cids].mean(-1).sum()
+    # Get the gradient of the prediction with respect to the input
+    grad = torch.autograd.grad(out, inp["stim"])[0]
+    if grad is None:
+        print("No gradient")
+        return None
+    if plot:
+        plot_stim(grad.detach().cpu().reshape(shape))
+    return grad
+
+def integrated_irf(inp, model, cids, n_steps=2, plot=False, shape=(35, 35, 24)):
+    '''
+        Generate the integrated IRF for a given input and neuron/s.
+        
+        inp: input dictionary
+        cids: list of neuron ids
+        n_steps: number of steps to integrate over
+        shape: shape of the input for plotting
+    '''
+    grad = torch.zeros_like(inp["stim"])
+    for a in np.linspace(1, 0, n_steps, endpoint=False):
+        t_inp = deepcopy(inp)
+        t_inp["stim"] = a * t_inp["stim"]
+        grad += irf(inp, model, cids)
+    if plot:
+        plot_stim(grad.detach().cpu().reshape(shape))
+    return grad / n_steps
+
+def get_noise_profile(N, type='white'):
     F = np.abs(np.fft.fftfreq(N))
     S = np.ones(F.shape)
     nz = F != 0
@@ -20,10 +60,24 @@ def generate_noise(N, type='white'):
         S = F
     elif type != 'white':
         raise ValueError('Invalid noise type')
-    S = S[:, None] @ S[None, :]
-    S = S / np.sqrt(np.mean(S**2))
-    X_white = np.fft.fftn(np.random.randn(N, N))
-    return np.abs(np.fft.ifftn(X_white * S))
+    return S / np.sqrt(np.mean(S**2))
+
+def generate_noise(shape, type='white', bsize=None, device=None, dtype=np.float32):
+    '''
+        Generate ND noise.
+    '''
+    profiles = [get_noise_profile(N, type).flatten() for N in shape]
+    profiles = np.einsum('i,j,w->ijw', *profiles)
+    if bsize is not None:
+        shape = (bsize, *shape)
+        profiles = profiles[None,...]
+    X_white = np.fft.fftn(np.random.randn(*shape))
+    out = np.abs(np.fft.ifftn(X_white * profiles))
+    out = (out - out.mean()) / out.std()
+    out = out.astype(dtype)
+    if device is not None:
+        out = torch.from_numpy(out).to(device)
+    return out
 
 def plot_noise(n):
     '''
@@ -100,28 +154,41 @@ def mei(model, cids, start, alpha=0.1, nsteps=100, scalefunc=lambda x: 1, eps=1e
             break
     return start
 
-def get_gratings(dims, n=2, ppd=1/0.025, fps=120):
+def get_gratings(dims, fx, fy, ft, ppd=1/0.025, fps=120):
     '''
         Generate spatio-temporal sinusodial gratings.
 
+        Parameters:
         -dims (x, y, t)
-        -n: number of frequencies to sample per dimension (x, y, t)
-        -frequencies (fx, fy, ft) cycles per unit
-
-        To get the gratings for Fx, Fy, Ft, use the index I as follows:
-        -gratings[Ix, Iy, It, :, :, :]
-        Where I goes from 0 (F=0) to n-1 (max F, half a cycle/step)
+        -fx, fy, ft: np arrays, cycles per unit (i.e. per frame or pixel)
+        
+        Output:
+        -gratings
+        -freqs
+        
+        To get the gratings for frequencies fx, fy, ft and phases phix, phiy, phit:
+        -retreive index to frequency/phase mapping:
+        freqs[Ifx, Ify, Ift, Iphix, Iphiy, Iphit] -> [fx, fy, ft, phix, phiy, phit]
+        -retrieve the gratings from inds:
+        gratings[Ifx, Ify, Ift, Iphix, Iphiy, Iphit] -> grating(fx, fy, ft, phix, phiy, phit)
+        
+        *** note that the phase is discrete in pixel space to maintain contrast
+        *** so the angles are different for each frequency
+        
+        fx = np.linspace(0, 0.5, n[0])
+        fy = np.linspace(0, 0.5, n[1])
+        ft = np.linspace(0, 0.5, n[2])
     '''
     x = np.arange(dims[0])
     y = np.arange(dims[1])
     t = np.arange(dims[2])
-    fx = np.linspace(0, 0.5, n)
-    fy = np.linspace(0, 0.5, n)
-    ft = np.linspace(0, 0.5, n)
-    FX, FY, FT, X, Y, T = np.meshgrid(fx,fy,ft,x,y,t)
-    out_freq = np.array(np.meshgrid(fx*ppd,fy*ppd,ft*fps)).transpose((1, 2, 3, 0))
-    gratings = np.cos(2*np.pi*FX*X)*np.cos(2*np.pi*FY*Y)*np.cos(2*np.pi*FT*T)
-    return out_freq, gratings
+    FX, FY, FT, PHIx, PHIy, PHIt, X, Y, T = np.meshgrid(fx,fy,ft,x,y,t,x,y,t)
+    freqs = np.stack(np.meshgrid(fx,fy,ft,x,y,t), -1)
+    freqs[..., 3:] *= 2*np.pi*freqs[..., :3] # convert phase to radians
+    freqs[..., :3] *= np.array([ppd, ppd, fps]) # convert frequencies to cyc per correct unit
+    gratings = np.cos(2*np.pi*FX*(X+PHIx))*np.cos(2*np.pi*FY*(Y+PHIy))*np.cos(2*np.pi*FT*(T+PHIt))
+    inds = freqs[..., 3:].max(-1) < 2*np.pi
+    return freqs[inds], gratings[inds].astype(np.float32)
 
 def invariant_mei(model, cids, start, alpha=0.1, nsteps=100, scalefunc=lambda x: 1, eps=1e-3, name='', memory=1, pchange=0.5):
     '''

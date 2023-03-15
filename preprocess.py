@@ -2,7 +2,7 @@
 '''
     Preprocess data for training models.
 '''
-#%% Imports
+#%% Imports TODO: make sure shifters are loaded from and stored in the their session folder and not in stim_movies.
 import os, sys, getopt
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,73 +18,68 @@ from NDNT.training import Trainer, EarlyStopping
 from utils.utils import initialize_gaussian_envelope, memory_clear, seed_everything, get_datasets, plot_transients
 import utils.preprocess as utils
 from matplotlib.backends.backend_pdf import PdfPages
+seed_everything(0)
 
-#%% Parameters
-'''
-    User-Defined Parameters
-'''
-SESSION_NAME = '20200304'
-NUM_LAGS = 24
-TRAIN_SHIFTER = True
-
-
-if __name__ == "__main__":
-    argv = sys.argv[1:]
-    opts, args = getopt.getopt(argv,"t:s:l:",["train_shifter=", "session=", "lags="])
-    for opt, arg in opts:
-        if opt in ("-t", "--train_shifter"):
-            TRAIN_SHIFTER = arg.upper() == 'TRUE'
-        elif opt in ("-s", "--session"):
-            SESSION_NAME = arg
-        elif opt in ("-l", "--lags"):
-            NUM_LAGS = int(arg)
-
-DATADIR = [
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+session_name = '20200304'
+num_lags = 24
+train_shifter = False
+datadir = [
     '/Data/stim_movies/',
     '/mnt/Data/Datasets/MitchellV1FreeViewing/stim_movies/'
     ][0]
+
+if __name__ == "__main__" and "IPython" not in sys.modules:
+    argv = sys.argv[1:]
+    opts, args = getopt.getopt(argv,"t:s:l:p:d:",["train_shifter=", "session=", "lags=", "path=", "device="])
+    for opt, arg in opts:
+        if opt in ("-t", "--train_shifter"):
+            train_shifter = arg.upper() == 'TRUE'
+        elif opt in ("-s", "--session"):
+            session_name = arg
+        elif opt in ("-l", "--lags"):
+            num_lags = int(arg)
+        elif opt in ("-p", "--path"):
+            datadir = arg
+        elif opt in ("-d", "--device"):
+            device = torch.device(arg)
+
 WINDOW_SIZE = 35
 APPLY_SHIFTER = True
 TRAIN_FRAC = 0.85
-batch_size = 1000
-seed = 1234
-spike_sorting = 'kilowf'
-device = torch.device('cpu')
-train_device = torch.device(
-    'cuda:0' if torch.cuda.is_available() else 'cpu')
-val_device = train_device # if you're cutting it close, put the validation set on the cpu
-dtype = torch.float32
+BATCH_SIZE = 1000
+SEED = 1234
+SPIKE_SORTING = 'kilowf'
+val_device = device # if you're cutting it close, put the validation set on the cpu
 sesslist = list(get_stim_list().keys())
-assert SESSION_NAME in sesslist, "session name %s is not an available session" %SESSION_NAME
-NBname = 'shifter_{}'.format(SESSION_NAME)
-cwd = os.getcwd()
-NBname = f'shifter_{SESSION_NAME}_{seed}'
-dirname = os.path.join(cwd, 'data')
-if not os.path.exists(dirname):
-    os.makedirs(dirname)
-cp_dir = os.path.join(dirname, NBname)
-FracDF_include=0.2
+assert session_name in sesslist, "session name %s is not an available session" %session_name
+NBname = 'shifter_{}'.format(session_name)
+outdir = os.path.join(os.getcwd(), 'data', 'sessions', session_name)
+if not os.path.exists(outdir):
+    os.makedirs(outdir)
+cp_dir = os.path.join(outdir, NBname)
+FRAC_DF_INCLUDE=0.2
 #%% Shifter Training
 '''
     Training a new shifter.
 '''
-if TRAIN_SHIFTER:
-    ds = utils.get_ds(Pixel, DATADIR, SESSION_NAME, NUM_LAGS, spike_sorting)
-    stas, cids, gab_inds = utils.get_ds_analysis(ds, WINDOW_SIZE, FracDF_include)
+if train_shifter:
+    ds = utils.get_ds(Pixel, datadir, session_name, num_lags, SPIKE_SORTING)
+    stas, cids, gab_inds = utils.get_ds_analysis(ds, WINDOW_SIZE, FRAC_DF_INCLUDE)
 
-    maxsamples = get_max_samples(ds, train_device)
+    maxsamples = get_max_samples(ds, device)
     train_data, val_data, train_inds, val_inds = utils.get_data_from_ds(ds, int(TRAIN_FRAC*maxsamples), move_to_cpu=False)
 
-    cids = np.where(ds.covariates['dfs'].sum(dim=0) / ds.covariates['dfs'].shape[0] > FracDF_include)[0]
+    cids = np.where(ds.covariates['dfs'].sum(dim=0) / ds.covariates['dfs'].shape[0] > FRAC_DF_INCLUDE)[0]
     cids = np.intersect1d(cids, np.where(stas.sum(dim=(0,1,2))>0)[0])
 
     input_dims = ds.dims + [ds.num_lags]
 
     #Put dataset on GPU
-    train_dl, val_dl, _, _ = get_datasets(train_data, val_data, device=train_device, val_device=val_device, batch_size=batch_size)
+    train_dl, val_dl, _, _ = get_datasets(train_data, val_data, device=device, val_device=val_device, batch_size=BATCH_SIZE)
 
     def fit_shifter_model(affine=False, overwrite=False):
-        seed_everything(seed)
+        seed_everything(SEED)
         # manually name the model
         name = 'CNN_shifter'
         if affine:
@@ -151,7 +146,7 @@ if TRAIN_SHIFTER:
         earlystopping = EarlyStopping(patience=3, verbose=False)
 
         trainer = Trainer(optimizer=optimizer,
-            device = train_device,
+            device = device,
             dirpath = os.path.join(cp_dir, smod.name),
             log_activations=False,
             early_stopping=earlystopping,
@@ -209,7 +204,7 @@ if TRAIN_SHIFTER:
     model = mod0
 
     sta_true, sta_hat, fig05 = plot_transients(model, val_data)
-    filename = os.path.join(dirname, 'shifter_summary_%s_%d.pdf' %(SESSION_NAME, seed))
+    filename = os.path.join(outdir, 'shifter_summary_%s_%d.pdf' %(session_name, SEED))
     p = PdfPages(filename)
     for fig in [fig, fig00, fig01, fig02, fig03, fig04, fig05]: 
         fig.savefig(p, format='pdf') 
@@ -225,14 +220,14 @@ if TRAIN_SHIFTER:
         'shifters': shifters,
         'vernum': [0,1],
         'valloss': [loss0, loss1],
-        'numlags': NUM_LAGS,
+        'numlags': num_lags,
         'tdownsample': 2,
         'eyerad': 8,
         'input_dims': mod0.input_dims,
-        'seed': seed}
+        'seed': SEED}
 
-    fname = 'shifter_' + SESSION_NAME + '_' + ds.spike_sorting + '.p'
-    fpath = os.path.join(DATADIR,fname)
+    fname = 'shifter_' + session_name + '_' + ds.spike_sorting + '.p'
+    fpath = os.path.join(datadir,fname)
 
     with open(fpath, 'wb') as f:
         dill.dump(out, f)
@@ -243,10 +238,10 @@ if TRAIN_SHIFTER:
     Preproces.
 '''
 # Get dataset object from data directory.
-ds = utils.get_ds(Pixel, DATADIR, SESSION_NAME, NUM_LAGS, spike_sorting, load_shifters=APPLY_SHIFTER)
+ds = utils.get_ds(Pixel, datadir, session_name, num_lags, SPIKE_SORTING, load_shifters=APPLY_SHIFTER)
 
 # Analyze dataset.
-stas, cids, gab_inds = utils.get_ds_analysis(ds, WINDOW_SIZE, FracDF_include)
+stas, cids, gab_inds = utils.get_ds_analysis(ds, WINDOW_SIZE, FRAC_DF_INCLUDE)
 mu, bestlag, _ = plot_stas(stas.detach().numpy())
 f = utils.plot_sacta(ds)
 
@@ -259,25 +254,25 @@ indsN = np.where(~np.in1d(val_inds, gab_inds))[0]
 
 print('{} training samples, {} validation samples, {} Gabor samples, {} Image samples'.format(len(train_inds), len(val_inds), len(indsG), len(indsN)))
 
-cids = np.where(ds.covariates['dfs'].sum(dim=0) / ds.covariates['dfs'].shape[0] > FracDF_include)[0]
+cids = np.where(ds.covariates['dfs'].sum(dim=0) / ds.covariates['dfs'].shape[0] > FRAC_DF_INCLUDE)[0]
 cids = np.intersect1d(cids, np.where(stas.sum(dim=(0,1,2))>0)[0])
 
 input_dims = ds.dims + [ds.num_lags]
 mean_robs = ds.covariates['robs'][:,cids].mean(dim=0)
 
 # Store data and get dict of paths.
-with open(os.path.join(dirname, 'metadata.txt'), 'w') as f:
-    f.write(f'Session: {SESSION_NAME};\n\
-            num_lags: {NUM_LAGS};\n\
-            train_shifter: {TRAIN_SHIFTER};\n\
+with open(os.path.join(outdir, 'metadata.txt'), 'w') as f:
+    f.write(f'Session: {session_name};\n\
+            num_lags: {num_lags};\n\
+            train_shifter: {train_shifter};\n\
             apply_shifter: {APPLY_SHIFTER};\n\
             window_size: {WINDOW_SIZE};\n\
-            frac_df_include: {FracDF_include};\n\
+            frac_df_include: {FRAC_DF_INCLUDE};\n\
             num_neurons: {len(cids)};\n\
             num_train: {len(train_inds)};\n\
             num_val: {len(val_inds)};\n\
             train_frac: {TRAIN_FRAC};\n')
-paths = utils.store_data(train_data, val_data, cwd=cwd)
+paths = utils.store_data(train_data, val_data, path=outdir)
 
 #%% Get fixation indices.
 fix_inds_org = ds.get_fixation_indices(index_valid=True)
@@ -292,6 +287,6 @@ session = {
     'mu': mu.copy(),
     'input_dims': input_dims
 }
-with open(os.path.join(paths['data'], 'session.pkl'), 'wb') as f:
+with open(os.path.join(outdir, 'session.pkl'), 'wb') as f:
     dill.dump(session, f)
 #%%

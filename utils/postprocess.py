@@ -6,8 +6,13 @@ import numpy as np
 import math
 from copy import deepcopy
 from itertools import cycle
+import matplotlib
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from . import utils
+from .mei import irf, get_gratings
+from .cluster import corr_dist, cos_dist
+from scipy.signal import find_peaks
 
 class Loader():
     def __init__(self, ds, cyclic=True, shuffled=False):
@@ -37,6 +42,135 @@ class Grad():
         return Grad([g+other for g in self.grads])
     def __sub__(self, other):
         return Grad([g-other for g in self.grads])
+    
+def eval_gratings(model, device='cpu', alpha=1, shape=(35, 35, 24), fs=None):
+    '''
+    Evaluate the model on cosine gratings.
+    alpha: scaling factor for the gratings (0, 1]
+    fs: frequency samples for each dimension
+    '''
+    if fs is None:
+        fs = shape
+    fx = np.linspace(0, 0.5, fs[0])
+    fy = np.linspace(0, 0.5, fs[1])
+    ft = np.linspace(0, 0.5, fs[2])
+    frequencies = np.stack(np.meshgrid(fx, fy, ft), -1).reshape(-1, 3)
+    evals, phases = [], []
+    for ind, freq_ind in enumerate(frequencies):
+        freqs, gratings = get_gratings(shape, *np.array(freq_ind).reshape(3, 1))
+        gratings = torch.tensor(gratings, device=device).reshape(-1, *shape)
+        model.to(device)
+        out = model({"stim": gratings*alpha})
+        mx, amx = out.max(0)
+        phases.append(freqs[amx.cpu(), 3:])
+        evals.append(mx.detach().cpu())
+        frequencies[ind] = freqs[0, :3]
+        del out, freqs, gratings, mx, amx
+        print(f'{ind+1} / {frequencies.shape[0]}')
+        
+    return frequencies.reshape(*fs, 3), np.stack(phases, 1).reshape(-1, *fs, 3), torch.stack(evals).reshape(*fs, -1).detach().numpy()
+
+def csf_kernel_from_activations(phases, activations, shape=(35, 35, 24), fs=None):
+    if fs is None:
+        fs = shape
+    x = np.arange(shape[0])
+    y = np.arange(shape[1])
+    t = np.arange(shape[2])
+    fx = np.linspace(0, 0.5, fs[0])
+    fy = np.linspace(0, 0.5, fs[1])
+    ft = np.linspace(0, 0.5, fs[2])
+    X, Y, T = np.stack(np.meshgrid(x, y, t)).reshape(3, *shape, 1)
+    frequencies = np.stack(np.meshgrid(fx, fy, ft), -1).reshape(-1, 3)
+    phases = phases.reshape(phases.shape[1], -1, 3)
+    out_kernel = np.zeros((shape[0], shape[1], shape[2], activations.shape[-1]))  
+    activations = activations.reshape(-1, activations.shape[-1]) 
+    for ind, freq_ind in enumerate(frequencies):
+        FX, FY, FT = freq_ind
+        PHIx, PHIy, PHIt = phases[:, ind].T.reshape(3, 1, 1, 1, -1)
+        new_kernel = np.cos(2*np.pi*FX*X+PHIx)*np.cos(2*np.pi*FY*Y+PHIy)*np.cos(2*np.pi*FT*T+PHIt)
+        out_kernel += new_kernel*activations[ind]
+    return out_kernel.reshape(*shape, -1)
+
+
+def plot_contour_peaks(axs, n=1):
+    contours = [i for i in axs.get_children() if type(i) == matplotlib.collections.PathCollection]
+    levels = [[path._vertices.mean(0).tolist() for path in cont._paths] for cont in contours][::-1]
+    lengths = [len(i) for i in levels]
+    levels_n = [levels[i] for i in range(1, len(levels)) if lengths[i]>max(lengths[:i])]
+    zero = np.array(levels[0]).reshape(-1, 2)
+    for i in range(len(levels_n)):
+        current = levels_n[i]
+        dists = [min(np.linalg.norm(zero-j, axis=1)) for j in current]
+        inds = np.argsort(dists)[::-1][:len(current)-len(levels[0])]
+        levels_n[i] = [current[ind] for ind in inds]
+    levels = [levels[0]] + [i for i in levels_n if len(i)>0]
+    levels = np.concatenate(levels[:min(n, len(levels))], 0)
+    axs.scatter(*levels.T, c='black')
+    return levels
+
+def hist_peaks(distances, to_plot=False, **kwargs):
+    if to_plot:
+        plt.figure()
+        counts, bins, _ = plt.hist(distances, **kwargs)
+    else:
+        counts, bins = np.histogram(distances, **kwargs)
+    mid_bins = (bins[1:] + bins[:-1])/2
+    peaks, _ = find_peaks(counts, height=counts.max()/8)
+    return peaks, mid_bins[peaks], counts[peaks]
+
+# def eucl(x, y):
+#     out = x.dot(y)
+#     norm = (x.dot(x) * y.dot(y))**0.5
+#     return out/norm/2 + 0.5
+
+def get_peak_irfs(irfs):
+    dists_eucl, dists_corr = [], []
+    for i in irfs[1:]:
+        dists_eucl.append(cos_dist(i, irfs[0]))
+        dists_corr.append(corr_dist(i, irfs[0]))
+    dists_eucl = np.array(dists_eucl)
+    dists_corr = np.array(dists_corr)
+    eucl_hist_peaks = hist_peaks(dists_eucl, bins=20)
+    corr_hist_peaks = hist_peaks(dists_corr, bins=20)
+    eucl_irfs, corr_irfs = [], []
+    for i in eucl_hist_peaks[1]:
+        eucl_irfs.append(irfs[np.argmin(np.abs(dists_eucl - i))])
+    for i in corr_hist_peaks[1]:
+        corr_irfs.append(irfs[np.argmin(np.abs(dists_corr - i))])
+    states = f'{eucl_hist_peaks[0].shape[0]} eucl states, {corr_hist_peaks[0].shape[0]} corr states'
+    return {
+        'peaks': (eucl_hist_peaks, corr_hist_peaks),
+        'irfs': (eucl_irfs, corr_irfs),
+        'zero': irfs[0],
+        'num_states': (eucl_hist_peaks[0].shape[0], corr_hist_peaks[0].shape[0]),
+        'string': states
+    }
+
+def generate_irfs(val_dl, model, cids, path=None, zero=False, device='cpu'):
+    '''
+        Generates IRFs for a given neuron id, model and dataset
+        saves the IRFs to path if provided
+        Includes the IRF for when input is all zeros if zero=True
+    '''
+    irfs = []
+    for batch in tqdm(val_dl):
+        irfs.append(irf(batch, model, cids).detach().cpu())
+    if zero:
+        irfs.insert(0, irf(
+            {
+                "stim":
+                    torch.zeros((1, irfs[0].shape[-1]), device=device)
+            }, model, cids).detach().cpu())
+    irfs = torch.cat(irfs, dim=0)
+    if path is not None:
+        torch.save(irfs, path)
+    return irfs
+    
+def zscoreWeights(w):
+    w_mean = np.mean(w, axis=(0, 1, 2), keepdims=True)
+    w_std = np.std(w, axis=(0, 1, 2), keepdims=True)
+    w_normed = (w - w_mean) / w_std
+    return w_normed
 
 def eval_model_dist(dirname, nsamples_train=None, nsamples_val=None, device=torch.device('cpu')):
     train_data, val_data = utils.unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val)
@@ -49,7 +183,7 @@ def eval_model_dist(dirname, nsamples_train=None, nsamples_val=None, device=torc
         with open(os.path.join(dirname, folderName, 'model.pkl'), 'rb') as f:
             model = dill.load(f)
         model.to(device)
-        evals.append(eval_model(model, val_dl))
+        evals.append(eval_model_fast(model, val_dl))
         print(evals[-1])
 
     dill.dump(evals, open(os.path.join(dirname, 'evals.pkl'), 'wb'))
@@ -343,7 +477,6 @@ def eval_model(model, valid_dl):
     model.eval()
 
     LLsum, Tsum, Rsum = 0, 0, 0
-    from tqdm import tqdm
         
     device = next(model.parameters()).device  # device the model is on
     if isinstance(valid_dl, dict):
@@ -384,8 +517,45 @@ def eval_model(model, valid_dl):
 
     return LLneuron.detach().cpu().numpy()
 
+def eval_model_fast(model, valid_data):
+    '''
+        Evaluate model on validation data.
+        valid_data: either a dataloader or a dictionary of tensors.
+    '''
+    loss = model.loss.unit_loss
+    model.eval()
+    LLsum, Tsum, Rsum = 0, 0, 0
+    if isinstance(valid_data, dict):
+        rpred = model(valid_data)
+        LLsum = loss(rpred,
+                    valid_data['robs'][:,model.cids],
+                    data_filters=valid_data['dfs'][:,model.cids],
+                    temporal_normalize=False)
+        Tsum = valid_data['dfs'][:,model.cids].sum(dim=0)
+        Rsum = (valid_data['dfs'][:,model.cids]*valid_data['robs'][:,model.cids]).sum(dim=0)
+    else:
+        for data in tqdm(valid_data, desc='Eval models'):            
+            with torch.no_grad():
+                rpred = model(data)
+                LLsum += loss(rpred,
+                        data['robs'][:,model.cids],
+                        data_filters=data['dfs'][:,model.cids],
+                        temporal_normalize=False)
+                Tsum += data['dfs'][:,model.cids].sum(dim=0)
+                Rsum += (data['dfs'][:,model.cids] * data['robs'][:,model.cids]).sum(dim=0)
+                
+    LLneuron = LLsum/Rsum.clamp(1)
+
+    rbar = Rsum/Tsum.clamp(1)
+    LLnulls = torch.log(rbar)-1
+    LLneuron = -LLneuron - LLnulls
+
+    LLneuron/=np.log(2)
+
+    return LLneuron.detach().cpu().numpy()
+
 def eval_model_summary(model, valid_dl):
-    ev = eval_model(model, valid_dl)
+    ev = eval_model_fast(model, valid_dl)
     if np.inf in ev:
         i = np.count_nonzero(np.isposinf(ev))
         ni = np.count_nonzero(np.isneginf(ev))
