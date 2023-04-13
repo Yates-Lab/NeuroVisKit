@@ -20,7 +20,7 @@ import utils.preprocess as utils
 from matplotlib.backends.backend_pdf import PdfPages
 seed_everything(0)
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 session_name = '20200304'
 num_lags = 24
 train_shifter = False
@@ -275,14 +275,38 @@ with open(os.path.join(outdir, 'metadata.txt'), 'w') as f:
 paths = utils.store_data(train_data, val_data, path=outdir)
 
 #%% Get fixation indices.
-fix_inds_org = ds.get_fixation_indices(index_valid=True)
-sort_inds = np.argsort([max(i) if np.isin(i, train_inds).all() else np.inf for i in fix_inds_org])
-fix_inds_sorted = [fix_inds_org[i] for i in sort_inds]
-fix_inds_t = fix_inds_sorted[:len(train_inds)]
+fix_inds = ds.get_fixation_indices(index_valid=True)
+
+# sort for efficiency
+fix_inds_argsort = np.argsort([i[0] for i in fix_inds])
+fix_inds = [fix_inds[i] for i in fix_inds_argsort]
+
+fix_inds_train = [i for i in range(len(fix_inds)) if np.isin(fix_inds[i], train_inds).all()]
+fix_inds_val = [i for i in range(len(fix_inds)) if np.isin(fix_inds[i], val_inds).all()]
+
+# Flatten for efficiency and keep track of shape
+fix_lens_train = [len(fix_inds[i]) for i in fix_inds_train]
+fix_lens_val = [len(fix_inds[i]) for i in fix_inds_val]
+fix_inds_train_flat = [j for i in fix_inds_train for j in fix_inds[i]]
+fix_inds_val_flat = [j for i in fix_inds_val for j in fix_inds[i]]
+
+# Find the indices of fixational indices in the training and validation sets
+fix_inds_train = np.isin(train_inds, fix_inds_train_flat).nonzero()[0]
+fix_inds_val = np.isin(val_inds, fix_inds_val_flat).nonzero()[0]
+
+# The previous step lost order of indices, so we need to re-order them
+fix_inds_train = np.sort(fix_inds_train)
+fix_inds_val = np.sort(fix_inds_val)
+
+# Finally regroup them
+fix_inds_train = np.split(fix_inds_train, np.cumsum(fix_lens_train)[:-1])
+fix_inds_val = np.split(fix_inds_val, np.cumsum(fix_lens_val)[:-1])
+
 
 #%% Store session info.
 session = {
-    'fix_inds': fix_inds_t,
+    'fix_inds_train': fix_inds_train,
+    'fix_inds_val': fix_inds_val,
     'cids': cids,
     'mu': mu.copy(),
     'input_dims': input_dims

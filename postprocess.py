@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 seed_everything(0)
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda:1" if torch.cuda.is_available() else 'cpu')
 nsamples_train=1
 nsamples_val=None #56643
 batch_size=1000 # Reduce if you run out of memory
@@ -66,13 +66,13 @@ logger.log('Loaded data.')
 ev = utils.eval_model_summary(model, val_dl)
 best_cids = ev.argsort()[::-1]
 utils.plot_layer(core[0])
-logger.log('Evaluated model.')
+logger.log('Evaluated model.')   
 
 #%%    
 # Plot spatiotemporal first layer kernels.
 w_normed = utils.zscoreWeights(core[0].get_weights()) #z-score weights per neuron for visualization
-plot_sta_movie(w_normed, frameDelay=1, path=tosave_path+'_weights2D.gif', cmap='cool')
-plot_sta_movie(w_normed, frameDelay=1, path=tosave_path+'_weights3D.gif', threeD=True, cmap='cool')
+plot_sta_movie(w_normed, frameDelay=1, path=tosave_path+'_weights2D.gif', cmap='viridis')
+plot_sta_movie(w_normed, frameDelay=1, path=tosave_path+'_weights3D.gif', threeD=True, cmap='viridis')
 logger.log('Plotted first layer + movies.')
 
 #%%
@@ -109,3 +109,4 @@ for fig in [plt.figure(n) for n in plt.get_fignums()]:
     fig.savefig(pdf_file, format='pdf')
 pdf_file.close()
 logger.log('Saved results as pdf.')
+# %%

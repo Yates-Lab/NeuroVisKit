@@ -275,4 +275,86 @@ def invariant_mei(model, cids, start, alpha=0.1, nsteps=100, scalefunc=lambda x:
             plt.tight_layout()
     print("Done")
     return start
+
+# def animate():
+#     from matplotlib.animation import FuncAnimation
+#     from utils.mei import irf
+#     import matplotlib.animation as animation
+
+#     n = 500 # length of movie in frames
+#     offset = 16000 # index of initial frame
+#     id = 0 # cid of neuron to be used
+#     stims = val_data["stim"][offset:offset+n+24].reshape(-1, *input_dims)
+#     robs = val_data["robs"][offset:offset+n+24, id]
+#     is_saccade = val_data["fixation_num"][16000:16000+n+24] != val_data["fixation_num"][offset-1:offset-1+n+24]
+#     rfs = irf({"stim": stims}, model, best_cids[id])
+#     probs = model({"stim": stims})[:, best_cids[id]]
+#     stims = stims[:, 20, :, :]
+#     rfs = rfs[:, 20, :, :]
+#     rfs = rfs / torch.amax(torch.abs(rfs), keepdim=True, axis=(1, 2))
+
+#     stims = stims.detach().cpu().numpy()
+#     robs = robs.detach().cpu().numpy()
+#     is_saccade = is_saccade.detach().cpu().numpy()
+#     rfs = rfs.detach().cpu().numpy()
+#     probs = probs.detach().cpu().numpy() / 0.005
+#     fig = plt.figure()
+#     plt.suptitle('Frame 0')
+#     plt.subplot(3, 1, 1)
+#     plt.title('Stimulus')
+#     im1 = plt.imshow(np.zeros((35, 24)), cmap='viridis', aspect='auto', animated=True, vmin=-1, vmax=1)
+#     im1a = plt.gca()
+#     plt.yticks([])
+#     plt.xticks([])
+#     plt.subplot(3, 1, 2)
+#     plt.title('IRF')
+#     im2 = plt.imshow(np.zeros((35, 24)), cmap='viridis', aspect='auto', animated=True, vmin=-1, vmax=1)
+#     im2a = plt.gca()
+#     plt.yticks([])
+#     plt.xticks([])
+#     plt.subplot(3, 1, 3)
+#     plt.title('Response')
+#     x = np.arange(-23, 1)
+#     pl1, = plt.plot(x, np.zeros(24), label='true', c='blue')
+#     pl2, = plt.plot(x, np.zeros(24), label='pred', c='red')
+#     pla = plt.gca()
+#     plt.ylim(0, np.max([robs.max(), probs.max()]))
+#     plt.xlim(0, 23)
+#     plt.legend(loc='upper right')
+#     plt.tight_layout()
+        
+#     def animate(j):
+#         fig.suptitle(f'Frame {j}')
+#         i = j + 24
+#         im1.set_data(stims[i, :, ::-1])
+#         im2.set_data(rfs[i, :, ::-1])
+#         x = np.arange(j, i)
+        
+#         pla.set_xlim(j, i)
+#         pl1.set_data(
+#             x,
+#             robs[j:i],
+#         )
+#         pl2.set_data(
+#             x,
+#             probs[j:i],
+#         )
+        
+#         saccade_id = np.where(
+#             is_saccade[j:i],
+#         )[0]
+#         im1a.set_xticks(saccade_id, saccade_id+j)
+#         im2a.set_xticks(saccade_id, saccade_id+j)
+#         pla.set_xticks(saccade_id+j)
+#         return [im1, im2, pl1, pl2]
+
+#     fps = 5
+#     anim = FuncAnimation(
+#         fig,
+#         animate,
+#         frames = n,
+#         interval = int(n/fps),
+#         blit=True
+#     )
+#     anim.save(tosave_path+'video.mp4', writer = animation.FFMpegWriter(fps=fps))
 # %%

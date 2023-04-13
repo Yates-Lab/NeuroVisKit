@@ -39,7 +39,7 @@ def get_data_from_ds(ds, maxsamples=None, move_to_cpu=True):
     return train_data, val_data, train_inds, val_inds
 
 def store_data(train_data, val_data, path=None):
-    path_names = ['data', 'train_dir', 'val_dir', 'log_dir']
+    path_names = ['data', 'train_dir', 'val_dir']
     paths = {
         'data': path,
         'train_dir': os.path.join(path, 'train'),
@@ -71,7 +71,8 @@ def get_ds(Pixel, datadir, session_name, num_lags, spike_sorting='kilowf', load_
         # enforce_fixation_shift=False,
         covariate_requests={
             'fixation_onset': {'tent_ctrs': np.arange(-15, 60, 1)},
-            'frame_tent': {'ntents': 40}}
+            'frame_tent': {'ntents': 40},
+            'fixation_num': True}
         )
     print('calculating datafilters')
     ds.compute_datafilters(
