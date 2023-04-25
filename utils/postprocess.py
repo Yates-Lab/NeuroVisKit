@@ -42,6 +42,31 @@ class Grad():
         return Grad([g+other for g in self.grads])
     def __sub__(self, other):
         return Grad([g-other for g in self.grads])
+
+def plot_grid(mat, titles=None, vmin=None, vmax=None, **kwargs):
+    '''
+        Plot a grid of figures such that each subfigure has m subplots.
+        mat is a list of lists of image data (n, m, x, y)
+        titles is a list of titles of length n.
+    '''
+    n = len(mat)
+    m = len(mat[0])
+    
+    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(2*m, 2*n))
+    
+    for i in range(n):
+        for j in range(m):
+            axes[i, j].imshow(mat[i][j], vmin=vmin, vmax=vmax)
+            axes[i, j].axis('off')
+
+            if titles is not None:
+                axes[i, j].set_title(titles[i])
+    
+    for key in kwargs:
+        eval(f'plt.{key}')(kwargs[key])
+        
+    plt.tight_layout()
+    return fig
     
 def eval_gratings(model, device='cpu', alpha=1, shape=(35, 35, 24), fs=None):
     '''
@@ -145,6 +170,13 @@ def get_peak_irfs(irfs):
         'num_states': (eucl_hist_peaks[0].shape[0], corr_hist_peaks[0].shape[0]),
         'string': states
     }
+    
+def get_zero_irf(input_dims, model, cid, device='cpu'):
+    return irf(
+        {
+            "stim":
+                torch.zeros((1, *input_dims), device=device)
+        }, model, [cid]).detach().cpu().squeeze(0)
 
 def generate_irfs(val_dl, model, cids, path=None, zero=False, device='cpu'):
     '''
@@ -465,7 +497,7 @@ def plot_model(model):
 
     if hasattr(model.readout, 'mu'):
         plt.imshow(model.readout.get_weights())
-    else:
+    elif hasattr(model.readout, 'space'):
         plot_dense_readout(model.readout.space)
         plt.show()
         plt.imshow(model.readout.feature.get_weights())
@@ -517,7 +549,7 @@ def eval_model(model, valid_dl):
 
     return LLneuron.detach().cpu().numpy()
 
-def eval_model_fast(model, valid_data):
+def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
     '''
         Evaluate model on validation data.
         valid_data: either a dataloader or a dictionary of tensors.
@@ -526,7 +558,7 @@ def eval_model_fast(model, valid_data):
     model.eval()
     LLsum, Tsum, Rsum = 0, 0, 0
     if isinstance(valid_data, dict):
-        rpred = model(valid_data)
+        rpred = model(valid_data) * t_std + t_mean
         LLsum = loss(rpred,
                     valid_data['robs'][:,model.cids],
                     data_filters=valid_data['dfs'][:,model.cids],
@@ -536,7 +568,7 @@ def eval_model_fast(model, valid_data):
     else:
         for data in tqdm(valid_data, desc='Eval models'):            
             with torch.no_grad():
-                rpred = model(data)
+                rpred = model(data) * t_std + t_mean
                 LLsum += loss(rpred,
                         data['robs'][:,model.cids],
                         data_filters=data['dfs'][:,model.cids],
@@ -554,13 +586,14 @@ def eval_model_fast(model, valid_data):
 
     return LLneuron.detach().cpu().numpy()
 
-def eval_model_summary(model, valid_dl):
-    ev = eval_model_fast(model, valid_dl)
-    if np.inf in ev:
+def eval_model_summary(model, valid_dl, **kwargs):
+    ev = eval_model_fast(model, valid_dl, **kwargs)
+    print(ev)
+    if np.inf in ev or np.nan in ev:
         i = np.count_nonzero(np.isposinf(ev))
         ni = np.count_nonzero(np.isneginf(ev))
-        print(f'Warning: {i} neurons have infinite bits/spike, and {ni} neurons have ninf.')
-        ev = ev[~np.isinf(ev)]
+        print(f'Warning: {i} neurons have infinite/nan bits/spike, and {ni} neurons have ninf.')
+        ev = ev[~np.isinf(ev) & ~np.isnan(ev)]
     # Creating histogram
     _, ax = plt.subplots()
     ax.hist(ev, bins=10)
