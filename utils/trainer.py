@@ -72,9 +72,9 @@ def train(model,
 
     def train_one_step(data):
         nonlocal n_iter
-        for dsub in data:
-            if data[dsub].device != device:
-                data[dsub] = data[dsub].to(device)
+        # for dsub in data:
+        #     if data[dsub].device != device:
+        #         data[dsub] = data[dsub].to(device)
         out = model.training_step(data)
         n_iter += 1
         loss = out['loss']
@@ -86,14 +86,14 @@ def train(model,
     def train_one_epoch(train_loader):
         model.train()  # set model to training mode
         runningloss = 0
-        out_size = 0
+        out_size = len(train_loader)
         iterator = tqdm if verbose > 1 else lambda x: x
         for data in iterator(train_loader):
             out = train_one_step(data)
             if np.isnan(out['train_loss']):
+                print("nan training loss.")
                 break
             runningloss += out['train_loss']
-            out_size += 1
             torch.cuda.empty_cache()
         # should this be an aggregate out?
         return {'train_loss': runningloss/out_size}
@@ -160,7 +160,7 @@ def train(model,
                 else:
                     patience -= 1
                 verbose_print(
-                    f"Losing patience ಠ_ಠ (best val: {val_loss_min:.3f}, current val: {this_val:.3f}, patience: {patience})", v=2)
+                    f"Losing patience ಠ_ಠ (best val: {val_loss_min:.4f}, current val: {this_val:.4f}, patience: {patience})", v=2)
                 if patience < 0:
                     verbose_print("Early stopping...", "epoch", epoch, v=1)
                     break

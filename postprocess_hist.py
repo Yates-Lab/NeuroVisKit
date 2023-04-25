@@ -17,10 +17,10 @@ from matplotlib.backends.backend_pdf import PdfPages
 seed_everything(0)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
-nsamples_train=1
-nsamples_val=None #56643
-batch_size=1000 # Reduce if you run out of memory
-run_name = 'test_smooth'
+nsamples_train=50000
+nsamples_val=1 #56643
+batch_size=100 # Reduce if you run out of memory
+run_name = 'new_arch2_star'
 session_name = '20200304'
 isPytorch = False
 fast = False
@@ -70,7 +70,7 @@ logger.log('Loaded model.')
 
 #%%
 train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val, device=device, path=data_path)
-train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, batch_size=batch_size, device=device)
+train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, batch_size=batch_size, device=device, shuffle=False)
 loader = utils.Loader(val_ds, shuffled=True, cyclic=True)
 logger.log('Loaded data.')
 
@@ -105,6 +105,28 @@ elif not isPoisson and not isZScore:
         train_data["robs"][i-1:i+1] = 1
     for i in torch.where(val_data["robs"] > 1)[0]:
         val_data["robs"][i-1:i+1] = 1    
+
+for batch_size in [1, 10, 100, 1000]:
+    train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, batch_size=batch_size, device=device, shuffle=False)
+    losses = torch.empty(len(train_dl))
+    for i, batch in enumerate(train_dl):
+        probs = model(batch)
+        robs = batch['robs']
+        losses[i] = model.loss(probs, robs[:, cids]).detach().cpu()
+
+    print(len(train_dl), "batches")
+    plt.figure()
+    plt.title(f"batch size: {batch_size}")
+    plt.scatter(np.arange(losses.numel()), losses.flatten().tolist(), s=np.sqrt(batch_size)/10)
+    plt.ylabel("Loss")
+    plt.xlabel("Batch Index")
+    plt.figure()
+    plt.title(f"batch size: {batch_size}")
+    plt.hist(losses.flatten().tolist(), density=True, bins=np.linspace(0, 0.4, 100))
+    plt.xlabel("Loss")
+    plt.ylabel("Count")
+    
+    
 #%%
 zero_irfs = []
 for cc in best_cids:

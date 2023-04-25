@@ -77,7 +77,7 @@ def initialize_gaussian_envelope( ws, w_shape):
                 wx = np.einsum('abcde, d->abcde', wx, genv)
     return np.reshape(wx, [-1, nfilt])
 
-def get_datasets(train_data, val_data, device=None, val_device=None, batch_size=1000, force_shuffle=False):
+def get_datasets(train_data, val_data, device=None, val_device=None, batch_size=1000, force_shuffle=False, shuffle=True):
     '''
         Get datasets from data files.
     '''
@@ -91,9 +91,9 @@ def get_datasets(train_data, val_data, device=None, val_device=None, batch_size=
     val_ds = GenericDataset(val_data, device=val_device) # we're okay with being slow
 
     if train_ds.device.type=='cuda':
-        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle)
     else:
-        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=os.cpu_count()//2)
+        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle, pin_memory=True, num_workers=os.cpu_count()//2)
 
     to_shuffle = False or force_shuffle
     if val_ds.device.type=='cuda':
@@ -140,7 +140,13 @@ def load_model(checkpoint_path, model):
     print(f"Loaded model from checkpoint. {epoch} epochs trained.")
     return model
 
-def plot_transients(model, val_data, stimid=0, maxsamples=120):
+def plot_transients(model, val_data, stimid=0, maxsamples=120, device=None):
+    if device is not None:
+        model = model.to(device)
+        # model.model = model.model.to(device)
+        for key in ['stim', 'robs', 'dfs', 'eyepos', 'fixation_onset', 'stimid']:
+            val_data[key] = val_data[key].to(device)
+        
     sacinds = torch.where( (val_data['fixation_onset'][:,0] * (val_data['stimid'][:,0]-stimid)**2) > 1e-7)[0]
     nsac = len(sacinds)
     data = val_data
