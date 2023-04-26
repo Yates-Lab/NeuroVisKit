@@ -17,7 +17,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 seed_everything(0)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
-nsamples_train=50000
+nsamples_train=100000
 nsamples_val=1 #56643
 batch_size=100 # Reduce if you run out of memory
 run_name = 'new_arch2_star'

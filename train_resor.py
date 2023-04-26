@@ -3,14 +3,19 @@
 '''
 #%%
 import os, sys, getopt, __main__
-import json
+import json, copy
+import NDNT
 import torch
 import dill
 from utils.utils import seed_everything, unpickle_data, memory_clear, get_datasets
 from utils.train import get_trainer, get_loss
 from utils.get_models import get_model
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+import utils.postprocess as utils
+import numpy as np
 import torch.nn as nn
 import math
 from tqdm import tqdm
@@ -23,7 +28,7 @@ nsamples_train=236452
 nsamples_val=56643
 overwrite = False
 from_checkpoint = False
-device = torch.device('cpu')
+device = torch.device('cuda:1')
 seed = 420
 config = {
     'loss': 'poisson',
@@ -44,18 +49,12 @@ data_dir = os.path.join(dirname, 'sessions', session_name)
 os.makedirs(checkpoint_dir, exist_ok=True)
 with open(os.path.join(dirname, 'sessions', session_name, 'session.pkl'), 'rb') as f:
     session = dill.load(f)
-config.update({
-    'cids': session['cids'],
-    'input_dims': session['input_dims'],
-    'mu': session['mu'],
-    'fix_inds': session['fix_inds'],
-})
-
+    
 class RandomConvResBlock(nn.Module):
     def __init__(self, cin, cout, k=3, bias=True, residual=nn.Identity()):
         super().__init__()
-        self.register_buffer('conv', nn.Conv2d(cin, cout, k, bias=bias, padding=k//2))
-        self.register_buffer('residual', 0 if not residual else residual)
+        self.conv = nn.Conv3d(cin, cout, k, bias=bias, padding=k//2)
+        self.residual = 0 if not residual else residual
     def forward(self, x):
         return F.selu(self.conv(x) + self.residual(x))
 
@@ -77,54 +76,222 @@ class RandomResNet(nn.Module):
             )
         if cmid != cout:
             for i in range(math.ceil(math.log2(cmid)), math.ceil(math.log2(cout)), -1):
-                step_up.append(
+                step_down.append(
                     RandomConvResBlock(2**i, 2**(i-1), k, bias, residual=downResidual(2**(i-1)))
                 )
             if cout != 2**math.ceil(math.log2(cout)):
-                step_up.append(
+                step_down.append(
                     RandomConvResBlock(2**math.ceil(math.log2(cout)), cout, k, bias, residual=downResidual(cout))
                 )
         for i in range(depth - len(step_up) - len(step_down)):
             core.append(
                 RandomConvResBlock(cmid, cmid, k, bias)
             )
-        self.register_buffer(
-            'model',
-            nn.Sequential(
-                *[*step_up, *core, *step_down]
-            )
+        self.model = nn.Sequential(
+            *[*step_up, *core, *step_down]
         )
     def forward(self, x):
+        if x.dim() == 2:
+            x = x.reshape(-1, *session['input_dims'])
         return self.model(x)
 
 # %%
-# Load data.
-train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val, path=data_dir)
-train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device)
+project = False
+train = False
+if project:
+    # Load data.
+    train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val, path=data_dir)
+    train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device)
 
-#%%
-# Train model.
-train_device = 'cuda:1'
+    # Train model.
+    train_device = 'cuda:1'
+    batch_size = 500
+    prefetch_factor = 10
+    cout = 1
+    depth = 264
+    cmid = 16
+
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=False)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+
+    model = RandomResNet(cout, depth=depth, cmid=cmid, k=3, bias=True, seed=420).to(train_device)
+    with torch.no_grad():
+        train_x_projected = torch.empty((len(train_ds), *session['input_dims']))
+        for i, batch in tqdm(enumerate(train_dl), total=len(train_dl), desc='Projecting training data'):
+            train_x_projected[i*batch_size:min((i+1)*batch_size, len(train_x_projected))] = model(batch['stim']).detach().cpu()
+        torch.save(train_x_projected, 'x_train_projected/0.pt')
+        del train_x_projected
+        val_x_projected = torch.empty((len(val_ds), *session['input_dims']))
+        for i, batch in tqdm(enumerate(val_dl), total=len(val_dl), desc='Projecting validation data'):
+            val_x_projected[i*batch_size:min((i+1)*batch_size, len(val_x_projected))] = model(batch['stim']).detach().cpu()
+        torch.save(val_x_projected, 'x_val_projected/0.pt')
+    quit()
+
 batch_size = 1000
-prefetch_factor = 10
-cout = 1
-depth = 264
-cmid = 16
+epochs = 100
+val_x_projected = torch.load('x_val_projected/0.pt').to(device)
+val_y = torch.load(os.path.join(data_dir, 'val', 'robs.pt')).to(device)[:len(val_x_projected), session['cids']]
+train_x_projected = torch.load('x_train_projected/0.pt').to(device)
+train_y = torch.load(os.path.join(data_dir, 'train', 'robs.pt')).to(device)[:len(train_x_projected), session['cids']]
 
-train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=train_device, prefetch_factor=prefetch_factor)
-val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=train_device, prefetch_factor=prefetch_factor)
+train_ds = TensorDataset(train_x_projected, train_y)
+val_ds = TensorDataset(val_x_projected, val_y)
 
-model = RandomResNet(cout, depth=depth, cmid=cmid, k=3, bias=True, seed=420).to(train_device)
-with torch.no_grad():
-    train_x_projected = torch.empty_like(train_data['stim'])
-    for i, batch in tqdm(enumerate(train_dl), total=len(train_dl), desc='Projecting training data'):
-        train_x_projected[i*batch_size:min((i+1)*batch_size, len(train_x_projected))] = model(batch['stim']).detach().cpu()
-    torch.save(train_x_projected, 'train_x_projected/0.pt')
-    del train_x_projected
-    val_x_projected = torch.empty_like(val_data['stim'])
-    for i, batch in tqdm(enumerate(val_dl), total=len(val_dl), desc='Projecting validation data'):
-        val_x_projected[i*batch_size:min((i+1)*batch_size, len(val_x_projected))] = model(batch['stim']).detach().cpu()
-    torch.save(val_x_projected, 'val_x_projected/0.pt')
+train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=True)
+
+in_size = math.prod(session['input_dims'])
+model = nn.Sequential(
+    nn.Flatten(),
+    nn.Linear(int(in_size), len(session['cids'])),
+    nn.ReLU()
+).to(device)
+loss_f, _= get_loss({'loss': 'poisson'})
+
+lbfgs = True
+
+if train:
+    if lbfgs:
+        optimizer = torch.optim.LBFGS(model.parameters(), lr=0.1)
+        def closure():
+            optimizer.zero_grad()
+            y_pred = model(train_x_projected)
+            loss = loss_f(y_pred, train_y)
+            loss.backward()
+            return loss
+
+        best_val_loss = torch.inf
+        best_model = None
+        for i in range(epochs):
+            loss = optimizer.step(closure)
+            print("epoch: ", i)
+            print(loss.item(), "lbfsg loss")
+            with torch.no_grad():
+                val_loss = loss_f(model(val_x_projected), val_y)
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss.item()
+                del best_model
+                best_model = copy.deepcopy(model)
+            print(val_loss, "val_loss")
+        
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        best_val_loss = torch.inf
+        best_model = None
+        for epoch in tqdm(range(epochs), desc='Epoch'):
+            train_loss = 0
+            for i, batch in tqdm(enumerate(train_dl), total=len(train_dl), desc='training', leave=False):
+                model.zero_grad()
+                loss = loss_f(model(batch[0]), batch[1])
+                train_loss += loss.item() / len(train_dl)
+                loss.backward()
+                optimizer.step()
+            with torch.no_grad():
+                val_loss = 0
+                for i, batch in tqdm(enumerate(val_dl), total=len(val_dl), desc='validation', leave=False):
+                    val_loss += loss_f(model(batch[0]), batch[1]) / len(val_dl)
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss.item()
+                del best_model
+                best_model = copy.deepcopy(model)
+            print(f'Epoch {epoch} | val_loss: {val_loss} | train_loss: {train_loss}')
+    
+    with open(os.path.join(checkpoint_dir, 'model.pkl'), 'wb') as f:
+        dill.dump(best_model, f)
+    with open(os.path.join(checkpoint_dir, 'metadata.txt'), 'w') as f:
+        to_write = {
+            'run_name': run_name,
+            'session_name': session_name,
+            'nsamples_train': nsamples_train,
+            'nsamples_val': nsamples_val,
+            'seed': seed,
+            'config': model.__str__(),
+            'device': str(device),
+            'best_val_loss': best_val_loss,
+        }
+        f.write(json.dumps(to_write, indent=2))
+else:
+    model = dill.load(open(os.path.join(checkpoint_dir, 'model.pkl'), 'rb'))
+        
+
+ev = utils.eval_model_summary(model, val_dl)
+    
+best_cids = ev.argsort()[::-1]
+#%%
+from matplotlib.animation import FuncAnimation
+import matplotlib.animation as animation
+
+n = 240*10 # length of movie in frames
+win = 240*2
+offset = 54137 # index of initial frame
+fast = False
+movie_cid_list = best_cids[:3] if not fast else []
+for cc in movie_cid_list:
+    stims = train_x_projected[offset:offset+n+win].reshape(-1, *session['input_dims']).squeeze()
+    robs = train_y[offset:offset+n+win, cc]
+    # is_saccade = val_data["fixation_num"][offset:offset+n+win] != val_data["fixation_num"][offset-1:offset-1+n+win]
+    probs = model({"stim": stims})[:, cc]
+    stims = stims[:, 20, :, :]
+
+    stims = stims.detach().cpu().numpy()
+    robs = robs.detach().cpu().numpy()
+    probs = probs.detach().cpu().numpy()
+
+    fig = plt.figure()
+    plt.suptitle('Frame 0')
+    plt.subplot(3, 1, 1)
+    plt.title('Stimulus')
+    im1 = plt.imshow(np.zeros((35, win)), cmap='viridis', aspect='auto', animated=True, vmin=-1, vmax=1)
+    im1a = plt.gca()
+    plt.yticks([])
+    plt.xticks([])
+    plt.subplot(3, 1, 3)
+    plt.title('Response')
+    x = np.arange(1, win+1)
+    pl1, = plt.plot(x, np.zeros(win), label='true', c='blue')
+    pl2, = plt.plot(x, np.zeros(win), label='pred', c='red')
+    pla = plt.gca()
+    plt.ylim(np.min([robs.min(), probs.min()]), np.max([robs.max(), probs.max()]))
+    plt.xlim(0, 23)
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+
+    def animate(j):
+        fig.suptitle(f'Neuron {cc}, Frame {j}')
+        i = j + win
+        im1.set_data(stims[j:i, :, 0].T)
+        x = np.arange(j, i)
+
+        pla.set_xlim(j, i)
+        pl1.set_data(
+            x,
+            robs[j:i],
+        )
+        pl2.set_data(
+            x,
+            probs[j:i],
+        )
+
+        im1a.set_xticklabels([])
+        pla.set_xticklabels([])
+        return [im1, pl1, pl2]
+
+    fps = 30
+    anim = FuncAnimation(
+        fig,
+        animate,
+        frames = n,
+        interval = int(n/fps),
+        blit=True
+    )
+
+    anim.save(checkpoint_dir+'postprocess_video_cid%d.mp4'%cc, writer = animation.FFMpegWriter(fps=fps))
+    del stims, robs, probs
+    
+pdf_file = PdfPages(checkpoint_dir + 'postprocess.pdf')
+for fig in [plt.figure(n) for n in plt.get_fignums()]:
+    fig.savefig(pdf_file, format='pdf')
+pdf_file.close()
 # memory_clear()
 # if from_checkpoint:
 #     with open(os.path.join(checkpoint_dir, 'model.pkl'), 'rb') as f:
@@ -175,3 +342,4 @@ with torch.no_grad():
 #         'best_val_loss': best_val_loss,
 #     }
 #     f.write(json.dumps(to_write, indent=2))
+# %%
