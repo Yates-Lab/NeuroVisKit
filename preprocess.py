@@ -3,7 +3,7 @@
     Preprocess data for training models.
 '''
 #%% Imports TODO: make sure shifters are loaded from and stored in the their session folder and not in stim_movies.
-import os, sys, getopt
+import os, sys, getopt, __main__
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -29,7 +29,7 @@ datadir = [
     '/mnt/Data/Datasets/MitchellV1FreeViewing/stim_movies/'
     ][0]
 
-if __name__ == "__main__" and "IPython" not in sys.modules:
+if __name__ == "__main__" and hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
     opts, args = getopt.getopt(argv,"t:s:l:p:d:",["train_shifter=", "session=", "lags=", "path=", "device="])
     for opt, arg in opts:

@@ -1,6 +1,37 @@
 from .utils import initialize_gaussian_envelope, seed_everything
 import torch
 from models import ModelWrapper, CNNdense
+from unet import UNet, BioV, PytorchWrapper
+
+def get_biov(config_init):
+    def get_biov_helper(config, device='cpu'):
+        seed_everything(config_init['seed'])
+        cids = config['cids']
+        input_dims = config_init['input_dims']
+        device = config_init['device']
+        pmodel = BioV(input_dims, cids, device)
+        pmodel.to(device)
+        return PytorchWrapper(pmodel)
+    return get_biov_helper
+
+def get_unet(config_init):
+    def get_unet_helper(config, device='cpu'):
+        seed_everything(config_init['seed'])
+        cids = config['cids']
+        model = ModelWrapper(UNet(cids))
+        model.to(device)
+        return model
+    return get_unet_helper
+
+# def get_attention_cnn(config_init):
+#     def get_attention_cnn_helper(config, device='cpu'):
+#         cnn = get_cnn(config_init)(config, device)
+#         cnn_out_dims = [cnn.model.core_subunits, *cnn.model.core[-1].output_dims[1:3], 1]
+#         new_readout = LinearAttentionReadout(cnn_out_dims, config['cids'])
+#         new_readout.to(device)
+#         cnn.model.readout = new_readout         
+#         return cnn
+#     return get_attention_cnn_helper
 
 def get_cnn(config_init):
     def get_cnn_helper(config, device='cpu'):
@@ -71,6 +102,9 @@ def get_cnn(config_init):
 
 MODEL_DICT = {
     'CNNdense': get_cnn,
+    'UNet': get_unet,
+    # 'AttentionCNN': get_attention_cnn,
+    'BioV': get_biov,
 }
 
 def verify_config(config):
