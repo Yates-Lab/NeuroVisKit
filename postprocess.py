@@ -24,11 +24,12 @@ run_name = 'test_smooth'
 session_name = '20200304'
 isPytorch = False
 fast = False
+sigmoid = False
 # loss = 'poisson'
 
 if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
-    opts, args = getopt.getopt(argv,"d:b:o:n:s:pl:f",["device=", "batch_size=", "run_name=", "session_name=", "pytorch", "loss=", "fast"])
+    opts, args = getopt.getopt(argv,"d:b:o:n:s:pl:f",["device=", "batch_size=", "run_name=", "session_name=", "pytorch", "loss=", "fast", "sigmoid"])
     for opt, arg in opts:
         if opt in ("-d", "--device"):
             device = torch.device(arg)
@@ -42,6 +43,8 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
             isPytorch = True
         elif opt in ("-f", "--fast"):
             fast = True
+        elif opt in ("--sigmoid"):
+            sigmoid = True
         # elif opt in ("-l", "--loss"):
         #     loss = arg
 
@@ -80,6 +83,8 @@ isZScore = hasattr(model, "t_mean")
 isPoisson = isinstance(model.loss, NDNT.metrics.poisson_loss.PoissonLoss_datafilter)
 if not isPoisson:
     model.loss = NDNT.metrics.poisson_loss.PoissonLoss_datafilter()
+if sigmoid:
+    model.model.output_NL = torch.nn.Sigmoid()
 if isZScore:
     if len(model.t_mean) != len(cids):
         model.t_mean = model.t_mean[session['cids']]

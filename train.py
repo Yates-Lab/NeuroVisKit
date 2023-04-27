@@ -7,7 +7,8 @@ import json
 import torch
 import dill
 from utils.utils import seed_everything, unpickle_data, memory_clear, get_datasets
-from utils.train import get_trainer, get_loss
+from utils.train import get_trainer
+from utils.loss import get_loss
 from utils.get_models import get_model
 import torch.nn.functional as F
 import torch.nn as nn
@@ -25,13 +26,13 @@ config = {
     'loss': 'poisson',
     'model': 'CNNdense',
     'trainer': 'adam',
-    'filters': [20, 20, 20, 20],
-    'kernels': [11, 11, 11, 11],
+    'filters': [32, 16, 32, 64],
+    'kernels': [9, 5, 5, 3],
     'preprocess': 'binarize',
-    'override_output_NL': False,
+    'override_output_NL': True,
 }
 
-if __name__ == "__main__" and hasattr(__main__, 'get_ipython'):
+if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
     opt_names = ["name=", "seed=", "train=", "val=", "config=", "from_checkpoint", "overwrite", "device=", "session=", "loss=", "model=", "trainer=", "preprocess=", "override_NL"]
     opts, args = getopt.getopt(argv,"n:s:oc:d:l:m:t:p:", opt_names)
@@ -87,7 +88,7 @@ config.update({
     'cids': session['cids'],
     'input_dims': session['input_dims'],
     'mu': session['mu'],
-    'fix_inds': session['fix_inds'],
+    # 'fix_inds': session['fix_inds'],
 })
 
 # %%
@@ -119,12 +120,14 @@ def zscore_robs(x):
     return (x - x.mean(0, keepdim=True)) / x.std(0, keepdim=True)
 
 if config['preprocess'] == 'binarize':
-    inds2 = train_data['robs'] > 1
-    for i in inds2:
-        train_data['robs'][max(i-1, 0):min(i+1, len(train_ds))] = 1
-    inds2 = val_data['robs'] > 1
-    for i in inds2:
-        val_data['robs'][max(i-1, 0):min(i+1, len(val_ds))] = 1
+    inds2 = torch.where(train_data['robs'] > 1)[0]
+    train_data['robs'][inds2 - 1] = 1
+    train_data['robs'][inds2 + 1] = 1
+    train_data['robs'][inds2] = 1
+    inds2 = torch.where(val_data['robs'] > 1)[0]
+    val_data['robs'][inds2 - 1] = 1
+    val_data['robs'][inds2 + 1] = 1
+    val_data['robs'][inds2] = 1
 elif config['preprocess'] == 'smooth':
     train_data['robs'] = smooth_robs(train_data['robs'], smoothN=10)
     val_data['robs'] = smooth_robs(val_data['robs'], smoothN=10)
