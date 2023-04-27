@@ -13,19 +13,19 @@ from models.utils import plot_stas
 import utils.postprocess as utils
 from models.utils.plotting import plot_sta_movie
 import matplotlib.pyplot as plt
+from utils.loss import NDNTLossWrapper
 from matplotlib.backends.backend_pdf import PdfPages
 seed_everything(0)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
 nsamples_train=1
-nsamples_val=None #56643
+nsamples_val=None #56643 | None is equivalent to all
 batch_size=1000 # Reduce if you run out of memory
 run_name = 'test_smooth'
 session_name = '20200304'
-isPytorch = False
-fast = False
-sigmoid = False
-# loss = 'poisson'
+isPytorch = False # skip NDNT-only utils
+fast = False # skip making movies
+sigmoid = False # force sigmoid activation
 
 if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
@@ -45,8 +45,6 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
             fast = True
         elif opt in ("--sigmoid"):
             sigmoid = True
-        # elif opt in ("-l", "--loss"):
-        #     loss = arg
 
 #%%
 # Determine paths.
@@ -63,7 +61,11 @@ with open(os.path.join(data_path, 'session.pkl'), 'rb') as f:
 cids = session['cids']
 with open(os.path.join(model_path, 'model.pkl'), 'rb') as f:
     model = dill.load(f)
-
+if os.path.exists(os.path.join(model_path, 'config.pkl')):
+    with open(os.path.join(model_path, 'config.pkl'), 'rb') as f:
+        config = dill.load(f)
+else:
+    config = {}
 model = model.to(device)
 model.model = model.model.to(device)
 if not isPytorch:
@@ -80,12 +82,12 @@ logger.log('Loaded data.')
 #%% 
 # Evaluate model and plot first layer.
 isZScore = hasattr(model, "t_mean")
-isPoisson = isinstance(model.loss, NDNT.metrics.poisson_loss.PoissonLoss_datafilter)
-if not isPoisson:
+isNDNT = isinstance(model.loss, NDNTLossWrapper)
+if not isNDNT:
     model.loss = NDNT.metrics.poisson_loss.PoissonLoss_datafilter()
 if sigmoid:
     model.model.output_NL = torch.nn.Sigmoid()
-if isZScore:
+if isZScore: # use t_mean and t_std to convert from z-score to firing rate
     if len(model.t_mean) != len(cids):
         model.t_mean = model.t_mean[session['cids']]
         model.t_std = model.t_std[session['cids']]
@@ -98,18 +100,21 @@ if not isPytorch:
     utils.plot_layer(core[0])
 logger.log('Evaluated model.')
 
-if not isPoisson and isZScore:
+if isZScore:
     fsize = 5
     for i in range(len(val_ds)-1, fsize-1, -1):
         val_data["robs"][i] = val_data["robs"][i-fsize:i].mean(0)
-    
     if isZScore:
         val_data["robs"] = (val_data["robs"] - val_data["robs"].mean(0, keepdims=True)) / val_data["robs"].std(0, keepdims=True)
-elif not isPoisson and not isZScore:
-    for i in torch.where(train_data["robs"] > 1)[0]:
-        train_data["robs"][i-1:i+1] = 1
-    for i in torch.where(val_data["robs"] > 1)[0]:
-        val_data["robs"][i-1:i+1] = 1    
+elif "preprocess" in config and config["preprocess"] == "binarize":
+    inds2 = torch.where(train_data['robs'] > 1)[0]
+    train_data['robs'][inds2 - 1] = 1
+    train_data['robs'][inds2 + 1] = 1
+    train_data['robs'][inds2] = 1
+    inds2 = torch.where(val_data['robs'] > 1)[0]
+    val_data['robs'][inds2 - 1] = 1
+    val_data['robs'][inds2 + 1] = 1
+    val_data['robs'][inds2] = 1
 #%%
 zero_irfs = []
 for cc in best_cids:

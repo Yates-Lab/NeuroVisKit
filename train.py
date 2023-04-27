@@ -6,8 +6,8 @@ import os, sys, getopt, __main__
 import json
 import torch
 import dill
-from utils.utils import seed_everything, unpickle_data, memory_clear, get_datasets
-from utils.train import get_trainer
+from utils.utils import seed_everything, unpickle_data, get_datasets
+import utils.train as utils
 from utils.loss import get_loss
 from utils.get_models import get_model
 import torch.nn.functional as F
@@ -23,15 +23,16 @@ from_checkpoint = False
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 seed = 420
 config = {
-    'loss': 'poisson',
-    'model': 'CNNdense',
-    'trainer': 'adam',
-    'filters': [32, 16, 32, 64],
+    'loss': 'poisson', # utils/loss.py for more loss options
+    'model': 'CNNdense', # utils/get_models.py for more model options
+    'trainer': 'adam', # utils/train.py for more trainer options
+    'filters': [32, 16, 32, 64], # the config is fed into the model constructor
     'kernels': [9, 5, 5, 3],
-    'preprocess': 'binarize',
-    'override_output_NL': True,
+    'preprocess': 'binarize', # this further preprocesses the data before training
+    'override_output_NL': True, # this overrides the output nonlinearity of the model according to the loss
 }
 
+# Here we make sure that the script can be run from the command line.
 if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
     opt_names = ["name=", "seed=", "train=", "val=", "config=", "from_checkpoint", "overwrite", "device=", "session=", "loss=", "model=", "trainer=", "preprocess=", "override_NL"]
@@ -88,7 +89,6 @@ config.update({
     'cids': session['cids'],
     'input_dims': session['input_dims'],
     'mu': session['mu'],
-    # 'fix_inds': session['fix_inds'],
 })
 
 # %%
@@ -97,8 +97,7 @@ train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val
 train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device)
 
 #%%
-# Train model.
-memory_clear()
+# Load model and preprocess data.
 if from_checkpoint:
     with open(os.path.join(checkpoint_dir, 'model.pkl'), 'rb') as f:
         model = dill.load(f).to(device)
@@ -109,17 +108,7 @@ model.loss, nonlinearity = get_loss(config)
 if config['override_output_NL']:
     model.model.output_NL = nonlinearity
 
-def smooth_robs(x, smoothN=10):
-    smoothkernel = torch.ones((1, 1, smoothN, 1), device=device) / smoothN
-    out = F.conv2d(
-        F.pad(x, (0, 0, smoothN-1, 0)).unsqueeze(0).unsqueeze(0),
-        smoothkernel).squeeze(0).squeeze(0)  
-    assert len(x) == len(out)
-    return out
-def zscore_robs(x):
-    return (x - x.mean(0, keepdim=True)) / x.std(0, keepdim=True)
-
-if config['preprocess'] == 'binarize':
+if config['preprocess'] == 'binarize': # Binarize the data to eliminate r > 1.
     inds2 = torch.where(train_data['robs'] > 1)[0]
     train_data['robs'][inds2 - 1] = 1
     train_data['robs'][inds2 + 1] = 1
@@ -129,13 +118,13 @@ if config['preprocess'] == 'binarize':
     val_data['robs'][inds2 + 1] = 1
     val_data['robs'][inds2] = 1
 elif config['preprocess'] == 'smooth':
-    train_data['robs'] = smooth_robs(train_data['robs'], smoothN=10)
-    val_data['robs'] = smooth_robs(val_data['robs'], smoothN=10)
+    train_data['robs'] = utils.smooth_robs(train_data['robs'], smoothN=10)
+    val_data['robs'] = utils.smooth_robs(val_data['robs'], smoothN=10)
 elif config['preprocess'] == 'zscore':
-    train_data['robs'] = zscore_robs(smooth_robs(train_data['robs'], smoothN=10))
-    val_data['robs'] = zscore_robs(smooth_robs(val_data['robs'], smoothN=10))
+    train_data['robs'] = utils.zscore_robs(utils.smooth_robs(train_data['robs'], smoothN=10))
+    val_data['robs'] = utils.zscore_robs(utils.smooth_robs(val_data['robs'], smoothN=10))
 
-trainer = get_trainer(config)
+trainer = utils.get_trainer(config)
 best_val_loss = trainer(model, train_dl, val_dl, checkpoint_dir, device)
 #save metadata
 with open(os.path.join(checkpoint_dir, 'metadata.txt'), 'w') as f:
@@ -150,3 +139,5 @@ with open(os.path.join(checkpoint_dir, 'metadata.txt'), 'w') as f:
         'best_val_loss': best_val_loss,
     }
     f.write(json.dumps(to_write, indent=2))
+with open(os.path.join(checkpoint_dir, 'config.pkl'), 'wb') as f:
+    dill.dump(config_original, f, 'wb')

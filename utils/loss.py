@@ -86,13 +86,12 @@ class LossFuncWrapper(nn.Module):
     '''
         Wrap a loss function to be used as a module.
     '''
-    def __init__(self, lossF_no_reduction, reduce=True):
+    def __init__(self, lossF_no_reduction, name):
         super().__init__()
         self.loss_f = lossF_no_reduction
-        self.reduce = reduce
+        self.name = name
     def forward(self, pred, target, *args, **kwargs):
-        loss = self.loss_f(pred, target, reduce=self.reduce)
-        return loss.mean() if self.reduce else loss
+        return self.loss_f(pred, target, reduce=True).mean()
     
 class NDNTLossWrapper(nn.Module):
     '''
@@ -171,8 +170,8 @@ class NDNTLossWrapper(nn.Module):
     
 LOSS_DICT = {
     'mse': NDNTLossWrapper(mse_f, "mse"),
-    'poisson': NDNT.metrics.poisson_loss.PoissonLoss_datafilter(),
-    'pearson': LossFuncWrapper(corrcoef_f, reduce=True),
+    'poisson': NDNTLossWrapper(poisson_f, "poisson"),
+    'pearson': LossFuncWrapper(corrcoef_f, "pearson"),
     'smse': NDNTLossWrapper(biased_mse_f, "smse"),
     'bsmse': NDNTLossWrapper(balanced_biased_mse_f, "bsmse"),
     'f1': NDNTLossWrapper(f1_f, "f1"),
@@ -180,7 +179,7 @@ LOSS_DICT = {
     'bce': NDNTLossWrapper(balanced_binary_cross_entropy_f, "bce"),
     'ce_logits': NDNTLossWrapper(binary_cross_entropy_with_logits_f, "ce_logits"),
     'bce_logits': NDNTLossWrapper(balanced_binary_cross_entropy_with_logits_f, "bce_logits"),
-    'torch_poisson': NDNTLossWrapper(poisson_f, "torch_poisson"),
+    'torch_poisson': LossFuncWrapper(poisson_f, "torch_poisson"),
 }
 
 NONLINEARITY_DICT = {

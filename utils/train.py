@@ -10,6 +10,17 @@ from dog import DoG, LDoG
 import torch.nn as nn
 import torch.nn.functional as F
 
+def smooth_robs(x, smoothN=10):
+    smoothkernel = torch.ones((1, 1, smoothN, 1), device=device) / smoothN
+    out = F.conv2d(
+        F.pad(x, (0, 0, smoothN-1, 0)).unsqueeze(0).unsqueeze(0),
+        smoothkernel).squeeze(0).squeeze(0)  
+    assert len(x) == len(out)
+    return out
+
+def zscore_robs(x):
+    return (x - x.mean(0, keepdim=True)) / x.std(0, keepdim=True)
+
 def train_f(opt, **kwargs):
     def train_f(model, train_loader, val_loader, checkpoint_dir, device, patience=30):
         max_epochs = 100

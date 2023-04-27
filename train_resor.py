@@ -20,7 +20,7 @@ import numpy as np
 import torch.nn as nn
 import math
 from tqdm import tqdm
-from unet_resor import build_unet
+from utils.reservoir import build_unet
 
 seed_everything(0)
 
