@@ -3,6 +3,13 @@
 To clone, run:
 ```console
 git clone --recurse-submodules git@github.com:VisNeuroLab/foundation.git
+cd foundation
+git submodule update --init --recursive --remote
+```
+
+To pull, run:
+```console
+git pull --recurse-submodules
 ```
 
 Install Ray:
@@ -12,19 +19,11 @@ pip install -U "ray[air]"
 pip install -U "ray[tune]"
 ```
 
-To pull, run:
-```console
-git pull --recurse-submodules
-```
-
-*make sure to modify your datadir in preprocess.py
-
+*make sure to modify your datadir in preprocess.py to the location of the raw datasets.
 
 **For contributers:**
 
-* In the datasets submodule, checkout the branch "foundation" and ensure its up to date.
-* For each other submodule, checkout main.
-
+Run the following script after cloning:
 ```console
 cd datasets
 git checkout -b foundation
@@ -38,4 +37,4 @@ cd ../
 ```
 
 **Sanity Check**:
-* Run preprocess, then once it is done run schedule.
+* Run preprocess, then once it is done run train.py
