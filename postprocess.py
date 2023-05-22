@@ -21,11 +21,12 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
 nsamples_train=1
 nsamples_val=None #56643 | None is equivalent to all
 batch_size=1000 # Reduce if you run out of memory
-run_name = 'test_smooth'
+run_name = 'test'
 session_name = '20200304'
 isPytorch = False # skip NDNT-only utils
 fast = False # skip making movies
 sigmoid = False # force sigmoid activation
+lightning = False
 
 if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
@@ -140,11 +141,12 @@ import matplotlib.animation as animation
 
 n = 240*10 # length of movie in frames
 win = 240*2
-offset = 54137 # index of initial frame
+offset = min(40000, len(val_ds)-n-win)#44137 # index of initial frame
 movie_cid_list = [] if fast else best_cids[:3]
 for cc in movie_cid_list:
+    cc_original = cids[cc]
     stims = val_data["stim"][offset:offset+n+win].reshape(-1, *input_dims).squeeze()
-    robs = val_data["robs"][offset:offset+n+win, cc]
+    robs = val_data["robs"][offset:offset+n+win, cc_original]
     is_saccade = val_data["fixation_num"][offset:offset+n+win] != val_data["fixation_num"][offset-1:offset-1+n+win]
     rfs = irf({"stim": stims}, model, cc)
     probs = model({"stim": stims})[:, cc]
@@ -186,7 +188,7 @@ for cc in movie_cid_list:
     saccade_id = np.where(is_saccade)[0]
 
     def animate(j):
-        fig.suptitle(f'Neuron {cc}, Frame {j}')
+        fig.suptitle(f'Neuron {cc_original} ({cc}th cid), Frame {j}')
         i = j + win
         im1.set_data(stims[j:i, :, 0].T)
         im2.set_data(rfs[i, :, ::-1])
@@ -219,7 +221,7 @@ for cc in movie_cid_list:
         blit=True
     )
 
-    anim.save(tosave_path+'_video_cid%d.mp4'%cc, writer = animation.FFMpegWriter(fps=fps))
+    anim.save(tosave_path+'_video_cid%d.mp4'%cc_original, writer = animation.FFMpegWriter(fps=fps))
     del stims, robs, is_saccade, rfs, probs
 #%%    
 # Plot spatiotemporal first layer kernels.
@@ -257,7 +259,8 @@ if not isPytorch:
 with open(tosave_path+'.txt', 'w') as f:
     to_write = [
         'Scores: ' + json.dumps(ev.tolist()),
-        'Best neurons: ' + json.dumps(best_cids.tolist()),
+        'cids: ' + json.dumps(cids.tolist()),
+        'Best neurons: ' + json.dumps(cids[best_cids].tolist()),
     ]
     f.write('\n'.join(to_write))
 pdf_file = PdfPages(tosave_path + '.pdf')

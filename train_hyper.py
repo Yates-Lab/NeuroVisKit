@@ -12,10 +12,13 @@ from utils.loss import get_loss
 from utils.get_models import get_model
 import torch.nn.functional as F
 import torch.nn as nn
+from utils.hyper import HyperGLM
+from utils.get_models import PytorchWrapper
 seed_everything(0)
 
-run_name = 'test' # Name of log dir.
+run_name = 'hyper_linear_basis20_e-4' # Name of log dir.
 session_name = '20200304'
+batch_size = 256
 nsamples_train=236452
 nsamples_val=56643
 overwrite = False
@@ -25,11 +28,11 @@ seed = 420
 config = {
     'loss': 'poisson', # utils/loss.py for more loss options
     'model': 'CNNdense', # utils/get_models.py for more model options
-    'trainer': 'adam', # utils/train.py for more trainer options
-    'filters': [20, 20, 20, 20], # the config is fed into the model constructor
-    'kernels': [11, 11, 11, 11],
+    'trainer': 'adam1e-4', # utils/train.py for more trainer options
+    'filters': [32, 16, 32, 64], # the config is fed into the model constructor
+    'kernels': [9, 5, 5, 3],
     'preprocess': None,#'binarize', # this further preprocesses the data before training
-    'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss
+    'override_output_NL': True, # this overrides the output nonlinearity of the model according to the loss
 }
 
 # Here we make sure that the script can be run from the command line.
@@ -66,8 +69,6 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
             config["preprocess"] = arg
         elif opt in ("--override_NL"):
             config["override_output_NL"] = True
-        elif opt in ("--session"):
-            session_name = arg
             
 #%%
 # Prepare helpers for training.
@@ -96,7 +97,7 @@ config.update({
 # %%
 # Load data.
 train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val, path=data_dir)
-train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device)
+train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device, batch_size=batch_size)
 
 #%%
 # Load model and preprocess data.
@@ -104,7 +105,7 @@ if from_checkpoint:
     with open(os.path.join(checkpoint_dir, 'model.pkl'), 'rb') as f:
         model = dill.load(f).to(device)
 else:
-    model = get_model(config)
+    model = PytorchWrapper(HyperGLM(session['cids']).to(device))
 
 model.loss, nonlinearity = get_loss(config)
 if config['override_output_NL']:

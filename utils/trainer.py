@@ -24,7 +24,8 @@ def train(model,
                 patience=10,
                 checkpoint_path=None,
                 device="cuda",
-                plot=False
+                plot=False,
+                memory_saver=False,
                 ):
     '''
         Parameters
@@ -72,10 +73,13 @@ def train(model,
 
     def train_one_step(data):
         nonlocal n_iter
-        # for dsub in data:
-        #     if data[dsub].device != device:
-        #         data[dsub] = data[dsub].to(device)
+        for dsub in data:
+            if data[dsub].device != device:
+                data[dsub] = data[dsub].to(device)
         out = model.training_step(data)
+        if memory_saver:
+            for dsub in data:
+                data[dsub] = data[dsub].cpu()
         n_iter += 1
         loss = out['loss']
         loss.backward()
@@ -108,6 +112,9 @@ def train(model,
                     if data[dsub].device != device:
                         data[dsub] = data[dsub].to(device)
                 out = model.validation_step(data)
+                if memory_saver:
+                    for dsub in data:
+                        data[dsub] = data[dsub].cpu()
                 runningloss += out['val_loss'].item()
                 torch.cuda.empty_cache()
         return {'val_loss': runningloss/nsteps}

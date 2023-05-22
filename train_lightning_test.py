@@ -2,7 +2,7 @@
     Script for generating a nice fitting pipeline.
 '''
 #%%
-import os, sys, getopt, __main__
+import os, sys, getopt, __main__, shutil
 import json
 import torch
 import dill
@@ -12,24 +12,69 @@ from utils.loss import get_loss
 from utils.get_models import get_model
 import torch.nn.functional as F
 import torch.nn as nn
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+from utils.postprocess import eval_model_summary
+import lightning as pl
+from lightning.pytorch.callbacks import LearningRateFinder, BatchSizeFinder, EarlyStopping
 seed_everything(0)
 
-run_name = 'test' # Name of log dir.
+class LitWrapper(pl.LightningModule):
+    # This is a wrapper for NDNT model wrappers (ie a squared wrapper).
+    def __init__(self, wrapped_model, train_ds, batch_size=1000, lr=1e-3, optimizer=torch.optim.Adam):
+        super().__init__()
+        # self.model = wrapped_model.model
+        self.wrapped_model = wrapped_model
+        self.opt = optimizer
+        # self.train_dataset = train_ds
+        self.batch_size = batch_size
+        self.learning_rate = lr
+        
+    def forward(self, x):
+        return self.wrapped_model(x)
+    
+    def configure_optimizers(self):
+        return self.opt(self.wrapped_model.parameters(), lr=self.learning_rate)
+    
+    # def train_dataloader(self):
+    #     return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=os.cpu_count()//2)
+    
+    def training_step(self, train_batch, batch_idx=0):
+        losses = self.wrapped_model.training_step(train_batch)
+        self.log("train_loss", losses['train_loss'], prog_bar=True, on_epoch=True)
+        if "reg_loss" in losses.keys():
+            self.log("reg_loss", losses['reg_loss'], prog_bar=True, on_step=True)
+        return losses#['loss']
+    
+    def validation_step(self, val_batch, batch_idx=0):
+        losses = self.wrapped_model.validation_step(val_batch)
+        self.log("val_loss", losses["val_loss"], prog_bar=True, on_epoch=True)
+        return losses#["val_loss"]
+    
+    # def on_validation_epoch_end(self):
+    #     with torch.no_grad():
+    #         with plt.ioff():
+    #             ev = eval_model_summary(model, self.val_dataloader())
+    #             self.log('summary', ev)
+    #     return super().on_validation_epoch_end()
+
+run_name = 'test_biov' # Name of log dir.
 session_name = '20200304'
 nsamples_train=236452
 nsamples_val=56643
 overwrite = False
 from_checkpoint = False
-device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+device = '1,' if torch.cuda.is_available() else 'cpu' # 'x' to train on first x gpus, 'x, y' to train on GPUs x and y, 'cpu' to train on cpu, 'auto' to train on all gpus
 seed = 420
 config = {
     'loss': 'poisson', # utils/loss.py for more loss options
-    'model': 'CNNdense', # utils/get_models.py for more model options
+    'model': 'BioV', # utils/get_models.py for more model options
     'trainer': 'adam', # utils/train.py for more trainer options
     'filters': [20, 20, 20, 20], # the config is fed into the model constructor
     'kernels': [11, 11, 11, 11],
-    'preprocess': None,#'binarize', # this further preprocesses the data before training
-    'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss
+    'preprocess': 'binarize', # this further preprocesses the data before training
+    'override_output_NL': True, # this overrides the output nonlinearity of the model according to the loss
+    'lightning': False,
 }
 
 # Here we make sure that the script can be run from the command line.
@@ -53,7 +98,7 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
         elif opt in ("--from_checkpoint"):
             from_checkpoint = True
         elif opt in ("-d", "--device"):
-            device = torch.device(arg)
+            device = arg
         elif opt in ("--session"):
             session_name = arg
         elif opt in ("-l", "--loss"):
@@ -76,14 +121,24 @@ config['device'] = device
 print('Device: ', device)
 config['seed'] = seed
 dirname = os.path.join(os.getcwd(), 'data')
-checkpoint_dir = os.path.join(dirname, 'models', run_name)
+light_dir = os.path.join(dirname, 'lightning')
+checkpoint_dir = os.path.join(light_dir, run_name)
 data_dir = os.path.join(dirname, 'sessions', session_name)
-if not os.path.exists(checkpoint_dir):
-    os.makedirs(checkpoint_dir)
-elif not overwrite and not from_checkpoint:
+if os.path.exists(checkpoint_dir) and not overwrite and not from_checkpoint:
     print('Directory already exists. Exiting.')
     print('If you want to overwrite, use the -o flag.')
     sys.exit()
+elif from_checkpoint:
+    print('Loading from the best checkpoint has not been implemented for torch lightning.')
+    raise NotImplementedError
+elif overwrite:
+    if os.path.exists(checkpoint_dir):
+        shutil.rmtree(checkpoint_dir)
+    else:
+        print('Directory does not exist (did not overwrite).')
+
+if not from_checkpoint:
+    os.makedirs(checkpoint_dir)
     
 with open(os.path.join(dirname, 'sessions', session_name, 'session.pkl'), 'rb') as f:
     session = dill.load(f)
@@ -96,15 +151,14 @@ config.update({
 # %%
 # Load data.
 train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val, path=data_dir)
-train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device)
+train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=torch.device('cpu'))
 
 #%%
 # Load model and preprocess data.
-if from_checkpoint:
-    with open(os.path.join(checkpoint_dir, 'model.pkl'), 'rb') as f:
-        model = dill.load(f).to(device)
-else:
-    model = get_model(config)
+# if from_checkpoint:
+#     model = LitWrapper.load_from_checkpoint(os.path.join(checkpoint_dir, 'model.ckpt'))
+# else:
+model = get_model(config) #LitWrapper(get_model(config), train_ds, batch_size=64, lr=1e-3, optimizer=torch.optim.Adam)
 
 model.loss, nonlinearity = get_loss(config)
 if config['override_output_NL']:
@@ -127,7 +181,22 @@ elif config['preprocess'] == 'zscore':
     val_data['robs'] = utils.zscore_robs(utils.smooth_robs(val_data['robs'], smoothN=10))
 
 trainer = utils.get_trainer(config)
-best_val_loss = trainer(model, train_dl, val_dl, checkpoint_dir, device)
+model = LitWrapper(model, train_ds, batch_size=1000, lr=1e-3, optimizer=torch.optim.Adam)
+best_val_loss = trainer(model.to(device), train_dl, val_dl, None, "cuda:0")
+# from utils.trainer import train
+# best_val_loss = train(
+#     model.to(device),
+#     train_dl,
+#     val_dl,
+#     optimizer=torch.optim.Adam(model.parameters(), lr=1e-3),
+#     verbose=2,
+#     device='cuda:0'
+# )
+
+# trainer = pl.Trainer(**trainer_args, default_root_dir=checkpoint_dir, max_epochs=1000)
+# trainer.fit(model, val_dataloaders=val_dl, train_dataloaders=train_dl)
+# best_val_loss = trainer.validate(model, dataloaders=val_dl, ckpt_path=checkpoint_dir)["val_loss"].item()
+
 #save metadata
 with open(os.path.join(checkpoint_dir, 'metadata.txt'), 'w') as f:
     to_write = {

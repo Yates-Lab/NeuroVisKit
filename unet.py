@@ -7,7 +7,8 @@ import einops
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
 import torch
-from torch import nn, einsum
+from torch import einsum
+import torch.nn as nn
 import torch.nn.functional as F
 from models.base import ModelWrapper
     
@@ -119,6 +120,33 @@ def spaceIsChannel(fn, x):
 def foldTime(x):
     b, c, t, h, w = x.shape
     return rearrange(x, "b c t h w -> b (c t) h w", b=b, t=t, c=c, h=h, w=w)
+
+class SingleStacker(nn.Module):
+    def __init__(self, cin, cout):
+        super().__init__()
+        self.stacker = nn.Parameter(torch.ones(cin, cout))
+    def forward(self, x):
+        return einops.einsum('b c ..., c d -> b d ...', x, self.stacker)
+
+class Stacker(nn.Module):
+    def __init__(self, layer_arr, cout_arr):
+        super().__init__()
+        self.layers = nn.ModuleList(layer_arr)
+        self.stacked = nn.ModuleList([
+            SingleStacker(torch.ones(sum(cout_arr[:i+2]), cout_arr[i+1]))
+            for i in range(len(layer_arr)-1)
+        ])
+    def forward(self, x):
+        prevX = []
+        for i, layer in enumerate(self.layers):
+            x = layer(x)
+            if i > 0:
+                x = self.stacked[i-1](
+                    torch.concat([x, *prevX], dim=1)
+                )
+            prevX.append(x)
+        return x
+
 
 # class AttentionGain(nn.Module):
 #     '''

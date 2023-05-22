@@ -1,8 +1,24 @@
 from .utils import initialize_gaussian_envelope, seed_everything
 import torch
 from models import ModelWrapper, CNNdense
-from unet import UNet, BioV, PytorchWrapper
+from unet import UNet, BioV
 
+class PytorchWrapper(ModelWrapper):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    def compute_reg_loss(self, *args, **kwargs):
+        return 0
+    def prepare_regularization(self, normalize_reg=False):
+        return 0
+    def forward(self, x, pass_dict=False, *args, **kwargs):
+        if type(x) is dict and not pass_dict:
+            x = x['stim']
+        if x.ndim == 3:
+            x = x.unsqueeze(1)
+        if x.ndim == 4:
+            x = x.unsqueeze(1)
+        return self.model(x, *args, **kwargs)
+    
 def get_biov(config_init):
     def get_biov_helper(config, device='cpu'):
         seed_everything(config_init['seed'])
@@ -10,7 +26,8 @@ def get_biov(config_init):
         input_dims = config_init['input_dims']
         device = config_init['device']
         pmodel = BioV(input_dims, cids, device)
-        pmodel.to(device)
+        if 'lightning' not in config_init or not config_init['lightning']:
+            pmodel.to(device)
         return PytorchWrapper(pmodel)
     return get_biov_helper
 
@@ -19,7 +36,8 @@ def get_unet(config_init):
         seed_everything(config_init['seed'])
         cids = config['cids']
         model = ModelWrapper(UNet(cids))
-        model.to(device)
+        if 'lightning' not in config_init or not config_init['lightning']:
+            model.to(device)
         return model
     return get_unet_helper
 
@@ -72,7 +90,7 @@ def get_cnn(config_init):
                 scaffold,
                 num_inh,
                 is_temporal=False,
-                NLtype='relu',
+                NLtype='softplus',
                 batch_norm=True,
                 norm_type=0,
                 noise_sigma=0,
