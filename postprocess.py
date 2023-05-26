@@ -17,6 +17,11 @@ from utils.loss import NDNTLossWrapper
 from matplotlib.backends.backend_pdf import PdfPages
 seed_everything(0)
 
+def gabor_timedomain(x, y, t, fx, fy, ft, cx, cy, ct, sx, sy, st, p):
+    exp = torch.exp(-0.5*((x-cx)/sx)**2-0.5*((y-cy)/sy)**2-0.5*((t-ct)/st)**2)
+    sin = torch.sin((x-cx)*fx+(y-cy)*fy+(t-ct)*ft+p)
+    return exp*sin
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
 nsamples_train=1
 nsamples_val=None #56643 | None is equivalent to all

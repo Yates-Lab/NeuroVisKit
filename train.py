@@ -28,14 +28,16 @@ config = {
     'trainer': 'adam', # utils/train.py for more trainer options
     'filters': [20, 20, 20, 20], # the config is fed into the model constructor
     'kernels': [11, 11, 11, 11],
-    'preprocess': None,#'binarize', # this further preprocesses the data before training
-    'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss
+    'preprocess': [],# this further preprocesses the data before training
+    'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss,
+    'pretrained_core': None,
+    'defrost': False,
 }
 
 # Here we make sure that the script can be run from the command line.
 if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
-    opt_names = ["name=", "seed=", "train=", "val=", "config=", "from_checkpoint", "overwrite", "device=", "session=", "loss=", "model=", "trainer=", "preprocess=", "override_NL"]
+    opt_names = ["name=", "seed=", "train=", "val=", "config=", "from_checkpoint", "overwrite", "device=", "session=", "loss=", "model=", "trainer=", "preprocess=", "override_NL", "pretrained_core=", "defrost"]
     opts, args = getopt.getopt(argv,"n:s:oc:d:l:m:t:p:", opt_names)
     for opt, arg in opts:
         if opt in ("-n", "--name"):
@@ -68,6 +70,10 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
             config["override_output_NL"] = True
         elif opt in ("--session"):
             session_name = arg
+        elif opt in ("--pretrained_core"):
+            config["pretrained_core"] = arg
+        elif opt in ("--defrost"):
+            config["defrost"] = True
             
 #%%
 # Prepare helpers for training.
@@ -77,6 +83,8 @@ print('Device: ', device)
 config['seed'] = seed
 dirname = os.path.join(os.getcwd(), 'data')
 checkpoint_dir = os.path.join(dirname, 'models', run_name)
+if config['pretrained_core'] is not None:
+    pretrained_dir = os.path.join(dirname, 'models', config['pretrained_core'])
 data_dir = os.path.join(dirname, 'sessions', session_name)
 if not os.path.exists(checkpoint_dir):
     os.makedirs(checkpoint_dir)
@@ -105,12 +113,22 @@ if from_checkpoint:
         model = dill.load(f).to(device)
 else:
     model = get_model(config)
+    if config['pretrained_core'] is not None:
+        with open(os.path.join(pretrained_dir, 'model.pkl'), 'rb') as f:
+            model_pretrained = dill.load(f).model.core.to(device)
+            for i in model_pretrained.parameters():
+                i.requires_grad = False
+            model.model.core = model_pretrained
+
+if config['defrost']:
+    for i in model.model.core.parameters():
+        i.requires_grad = True
 
 model.loss, nonlinearity = get_loss(config)
 if config['override_output_NL']:
     model.model.output_NL = nonlinearity
 
-if config['preprocess'] == 'binarize': # Binarize the data to eliminate r > 1.
+if 'binarize' in config['preprocess']: # Binarize the data to eliminate r > 1.
     inds2 = torch.where(train_data['robs'] > 1)[0]
     train_data['robs'][inds2 - 1] = 1
     train_data['robs'][inds2 + 1] = 1
@@ -119,10 +137,10 @@ if config['preprocess'] == 'binarize': # Binarize the data to eliminate r > 1.
     val_data['robs'][inds2 - 1] = 1
     val_data['robs'][inds2 + 1] = 1
     val_data['robs'][inds2] = 1
-elif config['preprocess'] == 'smooth':
+if 'smooth' in config['preprocess']:
     train_data['robs'] = utils.smooth_robs(train_data['robs'], smoothN=10)
     val_data['robs'] = utils.smooth_robs(val_data['robs'], smoothN=10)
-elif config['preprocess'] == 'zscore':
+if 'zscore' in config['preprocess']:
     train_data['robs'] = utils.zscore_robs(utils.smooth_robs(train_data['robs'], smoothN=10))
     val_data['robs'] = utils.zscore_robs(utils.smooth_robs(val_data['robs'], smoothN=10))
 
