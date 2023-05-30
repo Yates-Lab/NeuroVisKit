@@ -3,6 +3,8 @@
 '''
 #%%
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import json
 import NDNT
 import numpy as np
@@ -122,9 +124,16 @@ elif "preprocess" in config and config["preprocess"] == "binarize":
     val_data['robs'][inds2 + 1] = 1
     val_data['robs'][inds2] = 1
 #%%
+# check if model requires flattened input
+try:
+    utils.get_zero_irf(input_dims, model, 0, device)
+    model_input_shape = input_dims
+except Exception as e:
+    model_input_shape = (np.prod(input_dims),)
+    
 zero_irfs = []
 for cc in best_cids:
-    z = utils.get_zero_irf(input_dims, model, cc, device).permute(2, 0, 1)
+    z = utils.get_zero_irf(model_input_shape, model, cc, device).reshape(input_dims).permute(2, 0, 1)
     zero_irfs.append(z / torch.amax(torch.abs(z)))
 irf_powers = torch.stack(zero_irfs).pow(2).mean((1, 2))
 #plot irf powers for each neuron
@@ -153,8 +162,8 @@ for cc in movie_cid_list:
     stims = val_data["stim"][offset:offset+n+win].reshape(-1, *input_dims).squeeze()
     robs = val_data["robs"][offset:offset+n+win, cc_original]
     is_saccade = val_data["fixation_num"][offset:offset+n+win] != val_data["fixation_num"][offset-1:offset-1+n+win]
-    rfs = irf({"stim": stims}, model, cc)
-    probs = model({"stim": stims})[:, cc]
+    rfs = irf({"stim": stims.reshape(-1, *model_input_shape)}, model, cc).reshape(-1, *input_dims).squeeze()
+    probs = model({"stim": stims.reshape(-1, *model_input_shape)})[:, cc]
     stims = stims[:, 20, :, :]
     rfs = rfs[:, 20, :, :]
     rfs = rfs / torch.amax(torch.abs(rfs), keepdim=True, axis=(1, 2))
@@ -230,7 +239,7 @@ for cc in movie_cid_list:
     del stims, robs, is_saccade, rfs, probs
 #%%    
 # Plot spatiotemporal first layer kernels.
-if not isPytorch:
+if not isPytorch and not fast:
     w_normed = utils.zscoreWeights(core[0].get_weights()) #z-score weights per neuron for visualization
     plot_sta_movie(w_normed, frameDelay=1, path=tosave_path+'_weights2D.gif', cmap='viridis')
     # plot_sta_movie(w_normed, frameDelay=1, path=tosave_path+'_weights3D.gif', threeD=True, cmap='viridis')
@@ -256,7 +265,7 @@ sta_true, sta_hat, _ = plot_transients(model, val_data, device="cpu")
 logger.log('Plotted transients.')
 
 #%%
-if not isPytorch:
+if not isPytorch and hasattr(model.model, 'readout'):
     utils.plot_model(model.model)
     logger.log('Plotted model.')
 

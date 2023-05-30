@@ -4,8 +4,10 @@ from models import ModelWrapper, CNNdense
 from unet import UNet, BioV
 
 class PytorchWrapper(ModelWrapper):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, cids=None, **kwargs):
+        super().__init__(*args, cids=cids, **kwargs)
+        if not hasattr(self, 'cids'):
+            self.cids = cids
     def compute_reg_loss(self, *args, **kwargs):
         return 0
     def prepare_regularization(self, normalize_reg=False):

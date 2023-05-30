@@ -16,8 +16,8 @@ seed_everything(0)
 
 run_name = 'test' # Name of log dir.
 session_name = '20200304'
-nsamples_train=236452
-nsamples_val=56643
+nsamples_train=None
+nsamples_val=None
 overwrite = False
 from_checkpoint = False
 device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
@@ -32,13 +32,14 @@ config = {
     'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss,
     'pretrained_core': None,
     'defrost': False,
+    'batch_size': 1000,
 }
 
 # Here we make sure that the script can be run from the command line.
 if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
-    opt_names = ["name=", "seed=", "train=", "val=", "config=", "from_checkpoint", "overwrite", "device=", "session=", "loss=", "model=", "trainer=", "preprocess=", "override_NL", "pretrained_core=", "defrost"]
-    opts, args = getopt.getopt(argv,"n:s:oc:d:l:m:t:p:", opt_names)
+    opt_names = ["name=", "seed=", "train=", "val=", "config=", "from_checkpoint", "overwrite", "device=", "session=", "loss=", "model=", "trainer=", "preprocess=", "override_NL", "pretrained_core=", "defrost", "batch_size="]
+    opts, args = getopt.getopt(argv,"n:s:oc:d:l:m:t:p:b:", opt_names)
     for opt, arg in opts:
         if opt in ("-n", "--name"):
             run_name = arg
@@ -74,6 +75,8 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
             config["pretrained_core"] = arg
         elif opt in ("--defrost"):
             config["defrost"] = True
+        elif opt in ("-b", "--batch_size"):
+            config["batch_size"] = int(arg)
             
 #%%
 # Prepare helpers for training.
@@ -104,7 +107,7 @@ config.update({
 # %%
 # Load data.
 train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val, path=data_dir)
-train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device)
+train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device, batch_size=config['batch_size'])
 
 #%%
 # Load model and preprocess data.
@@ -125,6 +128,8 @@ if config['defrost']:
         i.requires_grad = True
 
 model.loss, nonlinearity = get_loss(config)
+if hasattr(model.loss, 'prepare_loss'):
+    model.loss.prepare_loss(train_data, cids=model.cids)
 if config['override_output_NL']:
     model.model.output_NL = nonlinearity
 

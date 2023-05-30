@@ -69,7 +69,66 @@ class GaborGLM(nn.Module):
         self.output_NL = output_NL
     def forward(self, x):
         return self.output_NL(self.core(x))
+    
+def generate_layer_i(input_dims, reg_vals, i):
+    reg_vals_clone = {}
+    for k in reg_vals.keys():
+        reg_vals_clone[k] = reg_vals[k][i] if type(reg_vals[k]) != int else reg_vals[k]
+    return layers.NDNLayer(input_dims=input_dims, num_filters=1, reg_vals=reg_vals_clone, bias=True, NLtype='softplus')
+
+class ConcatNDNLayer(nn.Module):
+    def __init__(self, input_dims, NC, reg_vals):
+        super().__init__()
+        self.input_dims = input_dims
+        self.NC = NC
+        self.reg_vals = reg_vals
+        self.layers = nn.ModuleList([generate_layer_i(input_dims, reg_vals, i) for i in range(NC)])
+    def forward(self, x):
+        b = input['stim'].shape[0]
+        x = x["stim"].reshape(b, -1)
+        return torch.cat([i(x) for i in self.layers], dim=1)
+    def compute_reg_loss(self):
+        return torch.stack([i.compute_reg_loss() for i in self.layers]).sum()
+    def prepare_regularization(self, normalize_reg=False):
+        for i in self.layers:
+            i.reg.normalize = normalize_reg
+            i.reg.build_reg_modules()
+    def get_regularization(self):
+        return torch.stack([i.get_regularization() for i in self.layers]).sum()
+
+# class GLM(torch.nn.Module):
+    
+#     def __init__(self, 
+#                  intput_dims,
+#                  NC,
+#                  cids=None,
+#                  reg_vals={}):
+#         seed_everything(seed)
+#         super().__init__()
         
+#         self.dims = intput_dims
+#         self.cids = cids
+#         self.loss = PoissonLoss_datafilter()
+        
+#         # build model
+#         self.layer = ConcatNDNLayer(intput_dims, NC, reg_vals)
+#         self.core = nn.Sequential(
+#             self.layer,
+#         )
+        
+#     def forward(self, input):
+#         y = self.layer(input['stim'])
+#         return y
+    
+#     def prepare_regularization(self, normalize_reg=False):
+#         self.layer.prepare_regularization(normalize_reg)
+        
+#     def compute_reg_loss(self):
+#         return self.layer.compute_reg_loss()
+    
+#     def get_regularization(self):
+#         return self.layer.get_regularization()
+
 class GLM(torch.nn.Module):
     
     def __init__(self, 
@@ -93,8 +152,8 @@ class GLM(torch.nn.Module):
         )
         
     def forward(self, input):
-        
-        y = self.layer(input['stim'])
+        b = input['stim'].shape[0]
+        y = self.layer(input['stim'].reshape(b, -1))
         
         return y
     
@@ -131,19 +190,19 @@ class GLM(torch.nn.Module):
         
     #     return {'loss': loss, 'val_loss': loss, 'reg_loss': None}
 
-run_name = 'test_glm_gabor' # Name of log dir.
+run_name = 'test_glm' # Name of log dir.
 session_name = '20200304'
 nsamples_train=None
-nsamples_val=56643
+nsamples_val=None
 overwrite = True
-from_checkpoint = True
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+from_checkpoint = False
+device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 seed = 420
 config = {
     'loss': 'poisson', # utils/loss.py for more loss options
-    'model': 'gabor_cnn', # utils/get_models.py for more model options
-    'trainer': 'Adam', # utils/train.py for more trainer options
-    'preprocess': [],# this further preprocesses the data before training
+    'model': 'tuned_glm', # utils/get_models.py for more model options
+    'trainer': 'LBFGS', # utils/train.py for more trainer options
+    'preprocess': ['gabor'],# this further preprocesses the data before training
     'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss,
     'pretained_core': None, # this is the name of a pretrained core to load
 }
@@ -246,77 +305,93 @@ if 'rfft' in config['preprocess']:
     val_data['stim'] = torch.fft.rfftn(val_data['stim'].reshape(-1, *config['input_dims']), dim=len(config['input_dims']), mode='forward')
     input_dims = val_data['stim'].shape[1:]
 
-train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=torch.device('cpu'))
+train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=torch.device('cpu'), batch_size=5000)
 
 # #%%
-# from utils.postprocess import eval_model_fast
-# from itertools import product
-# from tqdm import tqdm
-# class HiddenPrints:
-#     def __enter__(self):
-#         self._original_stdout = sys.stdout
-#         sys.stdout = open(os.devnull, 'w')
+from utils.postprocess import eval_model_fast
+from itertools import product
+from tqdm import tqdm
+from utils.loss import ExperimentalNDNTLossWrapper, poisson_f
+class HiddenPrints:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
 
-#     def __exit__(self, exc_type, exc_val, exc_tb):
-#         sys.stdout.close()
-#         sys.stdout = self._original_stdout
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
 # hp_ranges = [1e-3, 1e-2, 1e-1, 1, 10, 100]
 # hp_combos = list(product(hp_ranges, repeat=3))
-# cells = range(len(session['cids']))
-# scores = [np.inf for _ in cells]
-# hps = {
-#     'd2x': [None]*len(cells),
-#     'd2t': [None]*len(cells),
-#     'glocalx': [None]*len(cells),
-# }
-# errors, untried_pairs = [], []
-# for cell in tqdm(cells):
-#     for d2x, d2t, glocalx in tqdm(hp_combos, leave=False):
-#         try:
-#             with HiddenPrints():
-#                 model = GLM(
-#                     input_dims,
-#                     len(config['cids']),
-#                     #0.01, 0.11, 10
-#                     reg_vals={'d2x':d2x, 'd2t':d2t, 'glocalx':glocalx},
-#                     cids=config['cids'],
-#                 )
-#                 model = ModelWrapper(model)
-#                 model.prepare_regularization()
-#                 model = model.to(dtype=train_data['stim'].dtype)
-#                 seed_everything(seed)
-#                 optimizer = torch.optim.LBFGS(model.parameters(), lr=1)
-#                 trainer = LBFGSTrainer(
-#                     optimizer=optimizer,
-#                     device=device,
-#                     optimize_graph=True,
-#                     dirpath=False,
-#                     verbose=2,
-#                 )
-#                 print('Training...')
-#                 fitted = trainer.fit(model, train_data, val_data)
-#                 score = eval_model_fast(model, val_data)[cell]
-#                 if score > scores[cell]:
-#                     scores[cell] = score
-#                     hps['d2x'][cell] = d2x
-#                     hps['d2t'][cell] = d2t
-#                     hps['glocalx'][cell] = glocalx
-#                 del model, fitted, trainer
-#         except Exception as e:
-#             errors.append(str(e))
-#             untried_pairs.append((cell, session['cids'][cell], d2x, d2t, glocalx))
-# with open(os.path.join(checkpoint_dir, 'hp.txt'), 'w') as f:
-#     to_write = {
-#         'scores': str(scores),
-#         'd2x': str(hps['d2x']),
-#         'd2t': str(hps['d2t']),
-#         'glocalx': str(hps['glocalx']),
-#         'hp_ranges': str(hp_ranges),
-#         'errors': str(errors),
-#         'untried_pairs': str(untried_pairs),
-#     }
-#     f.write(json.dumps(to_write, indent=2))
-# quit()
+hp_ranges = [[0, 1e-3, 1e-1, 1, 10, 100], [0, 1e-3, 1e-1, 1, 10, 100], [100, 1000, 10000, 100000], [1]]
+hp_combos = list(product(*hp_ranges))
+cells = np.arange(len(session['cids']))
+np.random.shuffle(cells)
+np.random.shuffle(cells)
+scores = [np.NINF for _ in cells]
+hps = {
+    'd2x': [None]*len(cells),
+    'd2t': [None]*len(cells),
+    'glocalx': [None]*len(cells),
+}
+prior = 1/train_data["robs"][:, session['cids']].mean(0)
+prior = prior/len(prior)
+errors, untried_pairs = [], []
+for cell in tqdm(cells):
+    train_data_tmp = train_data.copy()
+    train_data_tmp["robs"] = train_data_tmp["robs"][:, session['cids'][cell]:session['cids'][cell]+1]
+    val_data_tmp = val_data.copy()
+    val_data_tmp["robs"] = val_data_tmp["robs"][:, session['cids'][cell]:session['cids'][cell]+1]
+    for d2x, d2t, glocalx, lm in tqdm(hp_combos, leave=False):
+        d2x, d2t, glocalx = d2x*lm, d2t*lm, glocalx*lm
+        try:
+            with HiddenPrints():
+                model = GLM(
+                    input_dims,
+                    1,
+                    #0.01, 0.11, 10
+                    reg_vals={'d2x':d2x, 'd2t':d2t, 'glocalx':glocalx},
+                    cids=[0],
+                )
+                model = ModelWrapper(model, loss=ExperimentalNDNTLossWrapper(poisson_f, "b", prior=prior[cell]))
+                model.prepare_regularization()
+                model = model.to(dtype=train_data_tmp['stim'].dtype)
+                seed_everything(seed)
+                optimizer = torch.optim.LBFGS(model.parameters(), lr=1, max_iter=1000)
+                trainer = LBFGSTrainer(
+                    optimizer=optimizer,
+                    device=device,
+                    optimize_graph=False,
+                    dirpath=False,
+                    verbose=2,
+                )
+                print('Training...')
+                fitted = trainer.fit(model, train_data_tmp, val_data_tmp)
+                score = eval_model_fast(model, val_data_tmp)[0]
+                if score > scores[cell]:
+                    scores[cell] = score
+                    hps['d2x'][cell] = d2x
+                    hps['d2t'][cell] = d2t
+                    hps['glocalx'][cell] = glocalx
+                del model, fitted, trainer
+        except Exception as e:
+            # print(e.with_traceback(), flush=True)
+            # print(f'Error with {cell}, {d2x}, {d2t}, {glocalx}')
+            errors.append(str(e))
+            untried_pairs.append((cell, session['cids'][cell], d2x, d2t, glocalx))
+        with open(os.path.join(checkpoint_dir, 'hp.txt'), 'w') as f:
+            to_write = {
+                'scores': str(scores),
+                'd2x': str(hps['d2x']),
+                'd2t': str(hps['d2t']),
+                'glocalx': str(hps['glocalx']),
+                'hp_ranges': str(hp_ranges),
+                'errors': str(errors),
+                'untried_pairs': str(untried_pairs),
+            }
+            f.write(json.dumps(to_write, indent=2))
+    del val_data_tmp, train_data_tmp
+        
+quit()
 #%%
 from models.utils import plot_sta_movie
 from utils.get_models import get_model
@@ -460,6 +535,27 @@ else:
             cids=config['cids'],
         ))
         model.prepare_regularization()
+    elif config['model'] == "tuned_glm":
+        hps = np.array(
+            [
+                [100, 0.01, 10, 10, 0.001, 1, 100, 100, 10, 10, 0.001, 10, 0.001, 10, 0.001, 0.001, 100, 1, 10, 100, 0.01, 100, 100, 0.001, 0.001, 0.01, 10, 100, 10, 0.01, 10, 10, 0.001, 100, 10, 10, 0.001, 10, 100, 10, 0.001, 100, 10, 10, 100, 0.001, 100, 0.001, 100, 100, 10, 10, 100, 100, 100, 10, 0.001, 100, 100, 100, 0.001, 10],
+                [100, 0.001, 10, 10, 0.001, 100, 0.01, 0.01, 10, 10, 0.01, 10, 100, 10, 100, 0.001, 0.01, 10, 10, 10, 0.001, 100, 1, 0.001, 0.001, 100, 100, 10, 10, 0.001, 100, 10, 100, 1, 100, 0.1, 100, 1, 100, 100, 0.001, 10, 10, 10, 0.001, 0.001, 100, 100, 10, 100, 100, 100, 10, 10, 10, 10, 100, 100, 100, 100, 0.01, 10],
+                [100, 100, 100, 100, 100, 10, 1, 1, 1, 1, 100, 1, 10, 1, 10, 100, 10, 1, 1, 100, 100, 10, 10, 100, 100, 1, 1, 100, 100, 100, 100, 100, 100, 100, 1, 1, 100, 100, 100, 1, 100, 100, 100, 1, 100, 100, 10, 10, 100, 100, 100, 1, 100, 100, 100, 100, 10, 100, 100, 100, 100, 0.001],
+            ]
+        )#.T.reshape(3, 62)
+        # hps = [1, 1, 1]
+        model = ModelWrapper(GLM(
+            input_dims,
+            len(config['cids']),
+            #0.01, 0.11, 10
+            reg_vals= {
+                'd2x': hps[0],
+                'd2t': hps[1],
+                'glocalx': hps[2],
+            },
+            cids=config['cids'],
+        ))
+        model.prepare_regularization()
     elif config['model'] == "torchGLM":
         model = PytorchWrapper(torchGLM(
             input_dims=input_dims,
@@ -481,11 +577,11 @@ else:
     else:
         raise ValueError("Model not recognized; only GLMs are supported.")
 model = model.to(device=device, dtype=train_data['stim'].dtype)
-
+#%%
 print('Training...')
 seed_everything(seed)
 if config['trainer'] == "LBFGS":
-    optimizer = torch.optim.LBFGS(model.parameters(), lr=1)
+    optimizer = torch.optim.LBFGS(model.parameters(), lr=1, max_iter=1000)
     trainer = LBFGSTrainer(
         optimizer=optimizer,
         device=device,
@@ -506,8 +602,8 @@ elif config['trainer'] == "Adam":
         verbose=2,
         early_stopping=EarlyStopping(patience=30, verbose=True, delta=1e-6),
     )
-    fitted = trainer.fit(model, train_dl, val_dl)
-plot_sta_movie(model.model.get_filters().permute(3, 1, 2, 0).numpy(), is_weights=False)
+    fitted = trainer.fit(model, train_data, val_dl)
+# plot_sta_movie(model.model.get_filters().permute(3, 1, 2, 0).numpy(), is_weights=False)
 #save metadata
 with open(os.path.join(checkpoint_dir, 'metadata.txt'), 'w') as f:
     to_write = {

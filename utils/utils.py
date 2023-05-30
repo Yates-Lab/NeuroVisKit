@@ -89,19 +89,14 @@ def get_datasets(train_data, val_data, device=None, val_device=None, batch_size=
     if val_device is None:
         val_device = device
     val_ds = GenericDataset(val_data, device=val_device) # we're okay with being slow
-
-    if train_ds.device.type=='cuda':
-        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle)
-    else:
-        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle, pin_memory=True, num_workers=os.cpu_count()//2)
-
-    to_shuffle = False or force_shuffle
-    if val_ds.device.type=='cuda':
-        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=to_shuffle)
-    else:
-        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=to_shuffle, pin_memory=True, num_workers=os.cpu_count()//2)
-
+    train_dl = get_dataloader(train_ds, batch_size=batch_size, shuffle=shuffle)
+    val_dl = get_dataloader(val_ds, batch_size=batch_size, shuffle=False or force_shuffle)
     return train_dl, val_dl, train_ds, val_ds
+
+def get_dataloader(dataset, batch_size=1000, shuffle=True):
+    if dataset.device.type=='cuda':
+        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=os.cpu_count()//2)
 
 def unpickle_data(nsamples_train=None, nsamples_val=None, device="cpu", path=None):
     '''
