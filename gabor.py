@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 %matplotlib inline
-
+#%%
 
 def gabor_timedomain(x, y, t, fx, fy, ft, cx, cy, ct, sx, sy, st, p):
     exp = np.exp(-0.5*((x-cx)/sx)**2-0.5*((y-cy)/sy)**2-0.5*((t-ct)/st)**2)

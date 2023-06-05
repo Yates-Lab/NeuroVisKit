@@ -8,7 +8,6 @@ import numpy as np
 import torch
 import traceback
 from tqdm import tqdm  # progress bar
-from copy import deepcopy
 import matplotlib.pyplot as plt
 # TODO -> identify the epoch of val_loss minimum
 # TODO -> get val data on device
@@ -46,7 +45,6 @@ def train(model,
     
     n_iter = 0
     val_loss_min = np.Inf
-    saved_model = ("model", "epoch")
     torch.cuda.empty_cache()
     if optimize_graph:
         torch.backends.cudnn.benchmark = True
@@ -58,18 +56,6 @@ def train(model,
         # print if verbose level is at least v
         if v <= verbose:
             print(*args, **kwargs)
-
-    def checkpoint():
-        # state = model.state_dict()
-        # check point the model
-        # ckpt = {
-        #     'net': state, # the model state puts all the parameters in a dict
-        #     'epoch': epoch,
-        #     'optim': optimizer.state_dict()
-        # } # probably also want to track n_ter =>  'n_iter': n_iter,
-        if checkpoint_path is not None:
-            smodel, sepoch = saved_model
-            dill.dump(smodel, open(os.path.join(checkpoint_path, 'model.pkl'), 'wb'))
 
     def train_one_step(data):
         nonlocal n_iter
@@ -122,7 +108,6 @@ def train(model,
     train_scores, val_scores = [], []
     def graceful_exit(reason=""):
         verbose_print(f"Exitting training...{reason}", v=1)
-        checkpoint()
         model.to("cpu")
         torch.cuda.empty_cache()
         if plot and len(train_scores) > 0:
@@ -147,18 +132,14 @@ def train(model,
             if np.isnan(train_loss):
                 verbose_print("Exiting: nan training loss.", v=1)
                 break
-            # model.cpu()
             out = validate_one_epoch(val_loader)
             this_val = out['val_loss']
             train_scores.append(train_loss)
             val_scores.append(this_val)
             if val_loss_min > this_val:
                 verbose_print("Checkpointing model...", v=2)
-                model.to("cpu")
-                del saved_model
-                saved_model = (deepcopy(model), epoch)
-                checkpoint()
-                model.to(device)
+                if checkpoint_path is not None:
+                    torch.save(model, os.path.join(checkpoint_path, 'model.pkl'))
                 verbose_print("Finished checkpointing", v=2)
             elif patience is not None:
                 e = 1e-10 #make it greater than zero in case you want to stop if doesn't converge.
@@ -171,14 +152,9 @@ def train(model,
                 if patience <= 0:
                     verbose_print("Early stopping...", "epoch", epoch, v=1)
                     break
-            # model.to(device)
             val_loss_min = min(this_val, val_loss_min)
             verbose_print("Epoch %d: train loss %.4f val loss %.4f" %
                         (epoch, train_loss, this_val), v=2)
-
-        # # checkpoint
-        # self.checkpoint_model(self.epoch, is_best=is_best)
-    #     return
     except (KeyboardInterrupt, Exception):
         print("Exception caught:")
         print(traceback.format_exc())

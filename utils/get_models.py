@@ -9,8 +9,12 @@ class PytorchWrapper(ModelWrapper):
         if not hasattr(self, 'cids'):
             self.cids = cids
     def compute_reg_loss(self, *args, **kwargs):
+        if hasattr(self.model, 'compute_reg_loss'):
+            return self.model.compute_reg_loss(*args, **kwargs)
         return 0
     def prepare_regularization(self, normalize_reg=False):
+        if hasattr(self.model, 'prepare_regularization'):
+            return self.model.prepare_regularization(normalize_reg=normalize_reg)
         return 0
     def forward(self, x, pass_dict=False, *args, **kwargs):
         if type(x) is dict and not pass_dict:
