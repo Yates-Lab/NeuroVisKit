@@ -1,28 +1,39 @@
 from .utils import initialize_gaussian_envelope, seed_everything
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
 from models import ModelWrapper, CNNdense
 from unet import UNet, BioV
+import math
+from tqdm import tqdm
+import moten
 
 class PytorchWrapper(ModelWrapper):
-    def __init__(self, *args, cids=None, **kwargs):
+    def __init__(self, *args, cids=None, bypass_preprocess=False, **kwargs):
         super().__init__(*args, cids=cids, **kwargs)
+        self.bypass_preprocess = bypass_preprocess
         if not hasattr(self, 'cids'):
             self.cids = cids
     def compute_reg_loss(self, *args, **kwargs):
+        loss = 0
         if hasattr(self.model, 'compute_reg_loss'):
-            return self.model.compute_reg_loss(*args, **kwargs)
-        return 0
+            loss = self.model.compute_reg_loss(*args, **kwargs)
+        if type(loss) is int:
+            return torch.tensor(loss, device=self.parameters().__next__().device).float()
+        return loss
     def prepare_regularization(self, normalize_reg=False):
         if hasattr(self.model, 'prepare_regularization'):
             return self.model.prepare_regularization(normalize_reg=normalize_reg)
         return 0
     def forward(self, x, pass_dict=False, *args, **kwargs):
-        if type(x) is dict and not pass_dict:
-            x = x['stim']
-        if x.ndim == 3:
-            x = x.unsqueeze(1)
-        if x.ndim == 4:
-            x = x.unsqueeze(1)
+        if not self.bypass_preprocess:
+            if type(x) is dict and not pass_dict:
+                x = x['stim']
+            if x.ndim == 3:
+                x = x.unsqueeze(1)
+            if x.ndim == 4:
+                x = x.unsqueeze(1)
         return self.model(x, *args, **kwargs)
     
 def get_biov(config_init):
@@ -47,6 +58,283 @@ def get_unet(config_init):
         return model
     return get_unet_helper
 
+# class gaborC(nn.Module):
+#     #assumes input has been preprocessed with gabors
+#     def __init__(self, cids, nl=nn.Softplus()):
+#         super().__init__()
+#         self.nfilters = moten.get_default_pyramid(vhsize=(70, 70), fps=240).nfilters
+#         self.cids = cids
+#         self.conv = nn.Conv1d(self.nfilters*len(cids), len(cids), kernel_size=36, groups=len(cids))
+#         self.filter_gain = nn.Parameter(torch.randn(len(cids), self.nfilters, 1))
+#         self.filter_bias = nn.Parameter(torch.randn(len(cids), self.nfilters, 1))
+#         self.output_NL = nl
+#     def forward(self, x):
+#         assert len(x["stim"]) == len(x["robs"])+35, "stim and robs must have same length: stim: {}, robs: {}".format(len(x["stim"]), len(x["robs"]))
+#         x = F.pad(x["stim"].flatten(1).T, (35, 0))
+#         x = x.unsqueeze(0) * self.filter_gain + self.filter_bias # shaped cids, nfilters, time
+#         x = F.softmax(x, 0)
+#         x = x.reshape(1, len(self.cids)*self.nfilters, -1)
+#         return self.output_NL(self.conv(x).squeeze(0).T[35:])
+#     def compute_reg_loss(self, *args, **kwargs):
+#         return torch.abs(self.conv.weight).mean()/10
+
+def gain(x, dim):
+    alpha = 1
+    x_sub = 1 + (torch.abs(x)**alpha).sum(dim=dim, keepdim=True)
+    return x / x_sub
+
+class self_attention1d(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.query = nn.Linear(in_dim, out_dim)
+        self.key = nn.Linear(in_dim, out_dim)
+        self.value = nn.Linear(in_dim, out_dim)
+        # self.bn = nn.BatchNorm1d(out_dim)
+        self.reg = 0
+    def forward(self, x):
+        q = self.query(x)
+        k = self.key(x)
+        v = self.value(x)
+        q = q.reshape(-1, self.out_dim, 1)
+        k = k.reshape(-1, self.out_dim, 1)
+        v = v.reshape(-1, self.out_dim, 1)
+        x = torch.bmm(q, k.transpose(1, 2))
+        # x = F.softmax(x, 2)
+        # x = self.bn(x)
+        x = gain(x, 2)
+        self.reg = torch.abs(x).mean()
+        x = torch.bmm(x, v)
+        return x.reshape(-1, self.out_dim)
+
+# class gaborC(nn.Module):
+#     #assumes input has been preprocessed with gabors
+#     def __init__(self, cids, nl=nn.Softplus()):
+#         super().__init__()
+#         self.nfilters = moten.get_default_pyramid(vhsize=(70, 70), fps=240).nfilters
+#         self.cids = cids
+#         self.atten = self_attention1d(self.nfilters, self.nfilters//4)
+#         self.conv = nn.Conv1d(self.nfilters//4, len(cids), kernel_size=36)
+#         self.output_NL = nl
+#     def forward(self, x):
+#         assert len(x["stim"]) == len(x["robs"])+35, "stim and robs must have same length: stim: {}, robs: {}".format(len(x["stim"]), len(x["robs"]))
+#         x = self.atten(x["stim"])
+#         x = F.pad(x.T, (35, 0)).unsqueeze(0)
+#         return self.output_NL(self.conv(x).squeeze(0).T[35:])
+#     def compute_reg_loss(self, *args, **kwargs):
+#         return self.atten.reg #torch.abs(self.conv.weight).mean()/100 #+ torch.abs(self.mlp[0].weight).mean()/100 + torch.abs(self.mlp[2].weight).mean()/100
+def dl_to_data(dl):
+    return {k: torch.cat([d[k] for d in dl]) for k in next(iter(dl)).keys()}
+
+class gaborC(nn.Module):
+    #assumes input has been preprocessed with gabors
+    def __init__(self, cids, nl=nn.Softplus()):
+        super().__init__()
+        self.nfilters = moten.get_default_pyramid(vhsize=(70, 70), fps=45).nfilters
+        self.cids = cids
+        self.linear = nn.Linear(self.nfilters, len(cids))
+        self.linear.bias.data = torch.zeros_like(self.linear.bias.data)
+        self.lag = 0
+        self.output_NL = nl
+    def forward(self, x):
+        return self.output_NL(self.linear(x["stim"]))
+    def compute_reg_loss(self, *args, **kwargs):
+        return torch.abs(self.linear.weight).mean()
+    def prepare_model(self, train_dl, *args, **kwargs):
+        if True:
+            data = dl_to_data(train_dl)
+            nfilters = data["stim"].shape[1]
+            stim, robs, dfs = data["stim"], data["robs"], data["dfs"]
+            stas = torch.zeros((65, nfilters), device=stim.device)
+            n = torch.zeros((65), device=stim.device)
+            # stim = (stim-stim.mean(0))/stim.std(0)
+            for i in range(len(robs)):
+                weights = (robs[i]*dfs[i]).reshape(-1, 1)
+                corr = stim[i].unsqueeze(0)
+                stas += corr*weights
+                n+=dfs[i]
+            self.linear.weight.data[:, :] = (stas / n.reshape(65, 1))[self.cids, :].to(stim.device)/100
+    
+def compute_l1_mlp_loss(mlp):
+    loss = 0
+    num_layers = 0
+    for layer in mlp:
+        if hasattr(layer, 'weight'):
+            loss += torch.abs(layer.weight).mean()
+            num_layers += 1
+    return loss/num_layers
+            
+def get_gaborC(config_init):
+    def get_gaborC_helper(config, device='cpu'):
+        seed_everything(config_init['seed'])
+        model = PytorchWrapper(gaborC(config['cids']), bypass_preprocess=True)
+        if 'lightning' not in config_init or not config_init['lightning']:
+            model.to(device)
+        return model
+    return get_gaborC_helper
+
+def pad_causal(x, layer, kdims=None):
+    kdims = kdims if kdims is not None else np.arange(len(layer.kernel_size))
+    pad_array = []
+    for i in np.arange(len(layer.kernel_size))[::-1]:
+        pad_array += [layer.kernel_size[i]-1, 0] if i in kdims else [0, 0]
+    return F.pad(x, pad_array)
+
+class separable_conv_layer(nn.Module):
+    def __init__(self, in_channels, out_channels, k=3):
+        super().__init__()
+        k = (k, k, k) if type(k) is int else k # x, y, t
+        #input shape will be (1, in_channels, x, y, t)
+        self.space_conv = nn.Conv3d(in_channels, out_channels, kernel_size=(k[0], k[1], 1), padding="same", groups=math.gcd(in_channels, out_channels))
+        self.time_conv = nn.Conv3d(out_channels, out_channels, kernel_size=(1, 1, k[2]), groups=out_channels)
+    def forward(self, x):
+        # x shape is (1, in_channels, x, y, t)
+        x = self.space_conv(x)
+        x = self.time_conv(pad_causal(x, self.time_conv))
+        return x
+
+class split_nonlinearity(nn.Module):
+    def __init__(self, f=nn.Softplus()):
+        super().__init__()
+        self.f = f
+    def forward(self, x):
+        return torch.cat([self.f(x), self.f(-x)], dim=1)
+    
+# class separable_res_block(nn.Module):
+#     def __init__(self, in_channels, out_channels, k=3, nl=nn.Softplus()):
+#         super().__init__()
+#         assert out_channels % 2 == 0, "out_channels must be even"
+#         self.bn = nn.BatchNorm3d(in_channels)
+#         self.conv = separable_conv_layer(in_channels, out_channels, k)
+#         self.split_nl = nl #split_nonlinearity(nl)
+#         self.resize = nn.Conv3d(in_channels, out_channels, kernel_size=1, groups=math.gcd(in_channels, out_channels))
+#     def forward(self, x):
+#         x = self.bn(x)
+#         y = self.split_nl(self.conv(x))
+#         return y + self.resize(x)
+    
+def oddify(i):
+    return i - 1 + i % 2
+def locality(x):
+    # calculates the locality of the energy of a batch of images in shape b, nx, ny
+    tx, ty = torch.meshgrid(torch.linspace(-1, 1, oddify(x.shape[1])), torch.linspace(-1, 1, oddify(x.shape[2])), indexing="ij")
+    locality_kernel = torch.sqrt(tx**2 + ty**2).to(x.device).unsqueeze(0).unsqueeze(0)
+    return F.conv2d(x.unsqueeze(1)**2, locality_kernel, padding="valid").mean()
+def locality_loss(layer):
+    if 1 in layer.kernel_size:
+        squeeze_dim =  1+list(layer.kernel_size).index(1)
+        filt = layer.weight.reshape(-1, *layer.kernel_size).squeeze(squeeze_dim)
+    elif len(layer.kernel_size) == 3:
+        filt = layer.weight.permute(0, 1, 4, 2, 3).reshape(-1, *layer.kernel_size[:2])
+    return locality(filt)
+# class separable_readout(nn.Module):
+#     def __init__(self, input_dims, ncids):
+#         super().__init__()
+#         self.input_dims = input_dims # (c, x, y, t)
+#         self.bn = nn.BatchNorm3d(input_dims[0])
+#         self.collapse_time = nn.Conv3d(ncids, ncids, kernel_size=(1, 1, input_dims[-1]), groups=ncids)
+#         self.collapse_channels = nn.Parameter(torch.rand(ncids, input_dims[0]))
+#         self.collapse_space = nn.Parameter(torch.rand(ncids, input_dims[1], input_dims[2]))
+#         self.gain = nn.Parameter(torch.ones(1, ncids))
+#         self.bias = nn.Parameter(torch.zeros(1, ncids))
+#     def forward(self, x):
+#         x = self.bn(x)
+#         x = torch.einsum("bcxyt,nc->bnxyt", x, self.collapse_channels)
+#         x = F.tanh(x)
+#         x = torch.einsum("bnxyt,nxy->bnt", x, self.collapse_space).unsqueeze(2).unsqueeze(2)
+#         x = F.tanh(x)
+#         x = self.collapse_time(pad_causal(x, self.collapse_time))
+#         return x.reshape(x.shape[1], x.shape[-1]).T[self.input_dims[-1]-1:] * self.gain + self.bias
+#     def compute_reg_loss(self, *args, **kwargs):
+#         return (locality_loss(self.collapse_time) + locality(self.collapse_space))/200000
+
+class separable_readout(nn.Module):
+    def __init__(self, input_dims, ncids):
+        super().__init__()
+        self.input_dims = input_dims # (c, x, y, t)
+        # self.collapse_channels = nn.Parameter(torch.randn(ncids, input_dims[0]))
+        # self.collapse_space = nn.Parameter(torch.randn(ncids, input_dims[1], input_dims[2]))
+        self.collaps = nn.Parameter(torch.randn(ncids, input_dims[0], input_dims[1], input_dims[2]))
+        self.gain = nn.Parameter(torch.ones(1, ncids))
+        self.bias = nn.Parameter(torch.zeros(1, ncids))
+    def forward(self, x):
+        # x = torch.einsum("bcxy,nxy->bcn", x, self.collapse_space)
+        # x = torch.einsum("bcn,nc->bn", x, self.collapse_channels)
+        x = torch.einsum("bcxy,ncxy->bn", x, self.collapse)
+        return x * self.gain + self.bias
+    def compute_reg_loss(self, *args, **kwargs):
+        return locality(self.collapse_space)/100000
+    
+# class dense_readout(nn.Module):
+#     def __init__(self, input_dims, ncids):
+#         super().__init__()
+#         self.input_dims = input_dims # (c, x, y, t)
+#         self.bn = nn.BatchNorm3d(input_dims[0])
+#         self.readout = nn.Conv3d(input_dims[0], ncids, kernel_size=input_dims[-3:])
+#     def forward(self, x):
+#         x = self.bn(x)
+#         x = pad_causal(x, self.readout, kdims=(2,))
+#         x = self.readout(x)
+#         return x.reshape(x.shape[1], x.shape[-1]).T[self.input_dims[-1]-1:]
+#     def compute_reg_loss(self, *args, **kwargs):
+#         return locality_loss(self.readout)/10
+
+class SeparableCore(nn.Module):
+    def __init__(self, input_dims):
+        super().__init__()
+        self.input_dims = input_dims # (1, x, y, nlags)
+        self.c1 = nn.Conv3d(input_dims[0], 20, kernel_size=(11, 11, self.input_dims[-1]))
+        self.bn1 = nn.BatchNorm2d(20)
+        self.c2 = nn.Conv2d(20, 20, kernel_size=11, padding="same")
+        self.bn2 = nn.BatchNorm2d(20)
+        self.c3 = nn.Conv2d(20, 20, kernel_size=11, padding="same")
+        self.bn3 = nn.BatchNorm2d(20)
+        self.c4 = nn.Conv2d(20, 20, kernel_size=11, padding="same")
+        self.bn4 = nn.BatchNorm2d(20)
+    def forward(self, x):
+        x = F.pad(x, (0, 0, 5, 5, 5, 5))
+        x = self.c1(x)
+        x = x.squeeze(0).permute(3, 0, 1, 2)
+        x = self.bn1(x)
+        x = F.softplus(x)
+        x = self.c2(x)
+        x = self.bn2(x)
+        x = F.softplus(x)
+        x = self.c3(x)
+        x = self.bn3(x)
+        x = F.softplus(x)
+        x = self.c4(x)
+        x = self.bn4(x)
+        x = F.softplus(x)
+        return x
+class SeparableCNN(nn.Module):
+    def __init__(self, input_dims, ncids, nl=nn.Softplus()):
+        super().__init__()
+        self.input_dims = input_dims # (1, x, y, nlags)
+        self.core = SeparableCore(input_dims)
+        self.readout = separable_readout((20, *input_dims[1:]), ncids)
+        self.output_NL = nl
+    def forward(self, x):
+        x = x["stim"].permute(1, 2, 3, 0).unsqueeze(0)
+        x = self.core(x)
+        return self.output_NL(self.readout(x))
+    def compute_reg_loss(self, *args, **kwargs):
+        return 0.0#self.readout.compute_reg_loss(*args, **kwargs)/100
+
+def get_separable_cnn(config_init):
+    def get_separable_cnn_helper(config, device='cpu'):
+        seed_everything(config['seed'])
+        model = PytorchWrapper(
+            SeparableCNN(config_init['input_dims'], len(config['cids'])),
+            bypass_preprocess=True,
+            cids=config['cids'],
+        )
+        # torch.compile(model.model)
+        if 'lightning' not in config_init or not config_init['lightning']:
+            model.to(device)
+        return model
+    return get_separable_cnn_helper
 # def get_attention_cnn(config_init):
 #     def get_attention_cnn_helper(config, device='cpu'):
 #         cnn = get_cnn(config_init)(config, device)
@@ -120,6 +408,8 @@ def get_cnn(config_init):
             cr0.readout.sigma.data.fill_(0.5)
             cr0.readout.sigma.requires_grad = True
         model = ModelWrapper(cr0)
+        if 'lightning' not in config_init or not config_init['lightning']:
+            model.to(device)
         model.prepare_regularization()
         return model
     return get_cnn_helper
@@ -129,6 +419,8 @@ MODEL_DICT = {
     'UNet': get_unet,
     # 'AttentionCNN': get_attention_cnn,
     'BioV': get_biov,
+    'gaborC': get_gaborC,
+    'seperableCNN': get_separable_cnn,
 }
 
 def verify_config(config):

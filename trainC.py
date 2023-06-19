@@ -1,0 +1,185 @@
+'''
+    Script for generating a nice fitting pipeline.
+'''
+#%%
+import os, sys, getopt, __main__, shutil, traceback
+import numpy as np
+import json, yaml
+import torch
+import dill
+from utils.utils import seed_everything, unpickle_data, get_datasets, get_opt_dict
+from utils.loss import get_loss
+from datasets.mitchell.pixel import FixationMultiDataset
+from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler
+import torch.nn.functional as F
+import torch.nn as nn
+import lightning as pl
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from utils.lightning import PLWrapper, get_fix_dataloader
+import utils.lightning as utils
+import logging
+from tqdm import tqdm
+logging.getLogger("pytorch_lightning.utilities.rank_zero").addHandler(logging.NullHandler())
+torch.set_float32_matmul_precision("medium")
+seed_everything(0)
+
+config_defaults = {
+    'loss': 'poisson', # utils/loss.py for more loss options
+    'model': 'CNNdense', # utils/get_models.py for more model options
+    'trainer': 'adam', # utils/train.py for more trainer options
+    'filters': [20, 20, 20, 20], # the config is fed into the model constructor
+    'kernels': [11, 11, 11, 11],
+    'preprocess': [],# this further preprocesses the data before training
+    'dynamic_preprocess': [], # this preprocesses the data dynamically during training
+    'load_preprocessed': False, # this loads the last preprocessed data from the session directory
+    'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss,
+    'pretrained_core': None,
+    'defrost': False,
+    'batch_size': 3,
+    'seed': 420,
+    'device': '1,',
+    'session': '20200304C',
+    'name': 'testC',
+    'overwrite': False,
+    'from_checkpoint': False,
+    'lightning': True,
+    'fast': False,
+    'compile': False,
+}
+
+# Here we make sure that the script can be run from the command line.
+if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
+    loaded_opts = get_opt_dict([
+        ('n:', 'name='),
+        ('s:', 'seed=', int),
+        # ('c:', 'config=', json.loads),
+        ('o', 'overwrite'),
+        (None, 'from_checkpoint'),
+        ('d:', 'device='),
+        (None, 'session='),
+        ('l:', 'loss='),
+        ('m:', 'model='),
+        ('t:', 'trainer='),
+        ('p:', 'preprocess='),
+        (None, 'override_NL'),
+        (None, 'pretrained_core='),
+        (None, 'defrost'),
+        ('b:', 'batch_size=', int),
+        (None, 'dynamic_preprocess='),
+        (None, 'load_preprocessed'),
+        ('f', 'fast'),
+        ('c', 'compile'),
+    ])
+    config_defaults.update(loaded_opts)
+    if config_defaults['from_checkpoint']:
+        with open(os.path.join(os.getcwd(), 'data', 'models', config_defaults["name"], 'config.json'), 'r') as f:
+            config = json.load(f)
+            # keys_to_remove = ['device', 'overwrite', 'session', 'loss', 'trainer', 'pretr']
+            config.update(loaded_opts)
+    else:
+        config = config_defaults
+else:
+    config = config_defaults
+    config["load_preprocessed"] = True
+    config["name"] = "dynamic"
+    config["overwrite"] = True
+#%%
+# Prepare helpers for training.
+config["dirname"] = os.path.join(os.getcwd(), 'data') # this is the directory where the data is stored
+dirs, config, session = utils.prepare_dirs(config)
+# %%
+# Load data.
+ds = FixationMultiDataset.load(dirs["ds_dir"])
+ds.use_blocks = True
+if config['load_preprocessed']:
+    with open(os.path.join(dirs["session_dir"], 'preprocessed.pkl'), 'rb') as f:
+        ds = dill.load(f)
+elif config['preprocess']:
+    dl = get_fix_dataloader(ds, np.arange(len(ds)), batch_size=1)
+    new_ds = []
+    preprocess_func = utils.PreprocessFunction(config["preprocess"])
+    for batch in tqdm(dl, desc='Preprocessing data'):
+        new_ds.append(preprocess_func(batch))
+    ds = utils.ArrayDataset(new_ds)
+    with open(os.path.join(dirs["session_dir"], 'preprocessed.pkl'), 'wb') as f:
+        dill.dump(ds, f)
+if config["trainer"] == "lbfgs":
+    train_dl = iter([ds[session["train_inds"]]])
+    val_dl = iter([ds[session["val_inds"]]])
+else:
+    train_dl = get_fix_dataloader(ds, session["train_inds"], batch_size=config['batch_size'])
+    val_dl = get_fix_dataloader(ds, session["val_inds"], batch_size=config['batch_size'])
+
+#%%
+# Load model and preprocess data.
+model = utils.prepare_model(config, dirs)
+model.loss, nonlinearity = get_loss(config)
+if hasattr(model.loss, 'prepare_loss'):
+    model.loss.prepare_loss(train_dl, cids=model.cids)
+if config['override_output_NL']:
+    model.model.output_NL = nonlinearity
+if config['compile']:
+    torch.compile(model, mode='reduce-overhead')
+    
+# model = model.to(torch.device("cuda:1"))
+# opt = model.configure_optimizers()
+# for i in tqdm(train_dl):
+#     i["robs"] = i["robs"][35:]
+#     i["dfs"] = i["dfs"][35:]
+#     loss = model.wrapped_model.training_step(utils.to_device(i, torch.device("cuda:1")))["loss"]
+#     opt.zero_grad()
+#     loss.backward()
+#     opt.step()
+# quit()
+
+callbacks = [
+    EarlyStopping(monitor='val_loss', patience=30, verbose=1, mode='min'),
+]
+if not config["fast"]:
+    callbacks.append(utils.LRFinder(num_training_steps=200))
+trainer_args = {
+    "callbacks": [
+        *(callbacks if config["trainer"] != "lbfgs" else []),
+        ModelCheckpoint(dirpath=dirs["checkpoint_dir"], filename='model', save_top_k=1, monitor="val_loss" if config["trainer"] != "lbfgs" else "train_loss", verbose=1, every_n_epochs=1),
+    ],
+    "accelerator": "cpu" if config["device"] == 'cpu' else "gpu",
+    "logger": TensorBoardLogger(dirs["checkpoint_dir"], version=0),
+}
+if config["device"] != 'cpu':
+    trainer_args["devices"] = config["device"]
+
+best_val_loss, error = 'inf (failed run)', None
+try:
+    trainer = pl.Trainer(**trainer_args, default_root_dir=dirs["checkpoint_dir"], max_epochs=1000 if config["trainer"] != "lbfgs" else 1)
+    trainer.fit(model, val_dataloaders=val_dl, train_dataloaders=train_dl)
+    best_val_loss = str(trainer.validate(dataloaders=val_dl, ckpt_path='best'))
+except (RuntimeError, KeyboardInterrupt, ValueError) as e:
+    error = str(traceback.format_exc())
+    print(error)
+    print('Training failed. Saving model anyway (backing up previous model).')
+    if os.path.exists(dirs["model_path"]):
+        shutil.copy(dirs["model_path"], dirs["model_path"][:-4] + '_backup.pkl')
+    if os.path.exists(dirs["config_path"]):
+        shutil.copy(dirs["config_path"], dirs["config_path"][:-5] + '_backup.json')
+    
+#save metadata
+with open(dirs["config_path"], 'w') as f:
+    to_write = {
+        **config,
+        'best_val_loss': best_val_loss,
+        'error': error,
+        'checkpoint_path': trainer.checkpoint_callback.best_model_path
+    }
+    for i in to_write.keys():
+        if hasattr(to_write[i], "tolist"):
+            to_write[i] = to_write[i].tolist()
+    f.write(json.dumps(to_write, indent=2))
+try:
+    with open(dirs["model_path"], 'wb') as f:
+        dill.dump(PLWrapper.load_from_config_path(dirs["config_path"]), f)
+        print('Model pickled.')
+except Exception as e:
+    print('Failed to pickle model.')
+    print(e)
+# %%

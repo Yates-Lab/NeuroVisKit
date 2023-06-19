@@ -24,7 +24,7 @@ def gabor_timedomain(x, y, t, fx, fy, ft, cx, cy, ct, sx, sy, st, p):
     sin = torch.sin((x-cx)*fx+(y-cy)*fy+(t-ct)*ft+p)
     return exp*sin
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda:1" if torch.cuda.is_available() else 'cpu')
 nsamples_train=1
 nsamples_val=None #56643 | None is equivalent to all
 batch_size=1000 # Reduce if you run out of memory
