@@ -22,7 +22,7 @@ def zscore_robs(x):
     return (x - x.mean(0, keepdim=True)) / x.std(0, keepdim=True)
 
 def train_f(opt, **kwargs):
-    def train_f(model, train_loader, val_loader, checkpoint_dir, device, patience=30):
+    def train_f(model, train_loader, val_loader, checkpoint_dir, device, patience=30, memory_saver=False):
         max_epochs = 100
         optimizer = opt(model.parameters(), **kwargs)
         val_loss_min = train(
@@ -34,12 +34,14 @@ def train_f(opt, **kwargs):
             verbose=2,
             checkpoint_path=checkpoint_dir,
             device=device,
-            patience=patience)
+            patience=patience,
+            memory_saver=memory_saver)
         return val_loss_min
     return train_f
 
 TRAINER_DICT = {
     'adam': train_f(torch.optim.Adam, lr=0.001),
+    'adam1e-4': train_f(torch.optim.Adam, lr=0.0001),
     # 'lbfgs': train_lbfgs,
     'dadaptadam': train_f(DAdaptAdam, lr=1),
     'dadaptsgd': train_f(DAdaptSGD, lr=1),

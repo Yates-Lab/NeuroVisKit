@@ -511,26 +511,26 @@ def eval_model(model, valid_dl):
     LLsum, Tsum, Rsum = 0, 0, 0
         
     device = next(model.parameters()).device  # device the model is on
-    if isinstance(valid_dl, dict):
-        for dsub in valid_dl.keys():
-                if valid_dl[dsub].device != device:
-                    valid_dl[dsub] = valid_dl[dsub].to(device)
-        rpred = model(valid_dl)
-        LLsum = loss(rpred,
-                    valid_dl['robs'][:,model.cids],
-                    data_filters=valid_dl['dfs'][:,model.cids],
-                    temporal_normalize=False)
-        Tsum = valid_dl['dfs'][:,model.cids].sum(dim=0)
-        Rsum = (valid_dl['dfs'][:,model.cids]*valid_dl['robs'][:,model.cids]).sum(dim=0)
+    with torch.no_grad():
+        if isinstance(valid_dl, dict):
+            for dsub in valid_dl.keys():
+                    if valid_dl[dsub].device != device:
+                        valid_dl[dsub] = valid_dl[dsub].to(device)
+            rpred = model(valid_dl)
+            LLsum = loss(rpred,
+                        valid_dl['robs'][:,model.cids],
+                        data_filters=valid_dl['dfs'][:,model.cids],
+                        temporal_normalize=False)
+            Tsum = valid_dl['dfs'][:,model.cids].sum(dim=0)
+            Rsum = (valid_dl['dfs'][:,model.cids]*valid_dl['robs'][:,model.cids]).sum(dim=0)
 
-    else:
-        for data in tqdm(valid_dl, desc='Eval models'):
-                    
-            for dsub in data.keys():
-                if data[dsub].device != device:
-                    data[dsub] = data[dsub].to(device)
-            
-            with torch.no_grad():
+        else:
+            for data in tqdm(valid_dl, desc='Eval models'):
+                        
+                for dsub in data.keys():
+                    if data[dsub].device != device:
+                        data[dsub] = data[dsub].to(device)
+                
                 rpred = model(data)
                 LLsum += loss(rpred,
                         data['robs'][:,model.cids],
@@ -558,13 +558,14 @@ def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
     model.eval()
     LLsum, Tsum, Rsum = 0, 0, 0
     if isinstance(valid_data, dict):
-        rpred = model(valid_data) * t_std + t_mean
-        LLsum = loss(rpred,
-                    valid_data['robs'][:,model.cids],
-                    data_filters=valid_data['dfs'][:,model.cids],
-                    temporal_normalize=False)
-        Tsum = valid_data['dfs'][:,model.cids].sum(dim=0)
-        Rsum = (valid_data['dfs'][:,model.cids]*valid_data['robs'][:,model.cids]).sum(dim=0)
+        with torch.no_grad():
+            rpred = model(valid_data) * t_std + t_mean
+            LLsum = loss(rpred,
+                        valid_data['robs'][:,model.cids],
+                        data_filters=valid_data['dfs'][:,model.cids],
+                        temporal_normalize=False)
+            Tsum = valid_data['dfs'][:,model.cids].sum(dim=0)
+            Rsum = (valid_data['dfs'][:,model.cids]*valid_data['robs'][:,model.cids]).sum(dim=0)
     else:
         for data in tqdm(valid_data, desc='Eval models'):            
             with torch.no_grad():

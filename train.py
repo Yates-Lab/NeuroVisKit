@@ -16,27 +16,30 @@ seed_everything(0)
 
 run_name = 'test' # Name of log dir.
 session_name = '20200304'
-nsamples_train=236452
-nsamples_val=56643
+nsamples_train=None
+nsamples_val=None
 overwrite = False
 from_checkpoint = False
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 seed = 420
 config = {
     'loss': 'poisson', # utils/loss.py for more loss options
     'model': 'CNNdense', # utils/get_models.py for more model options
     'trainer': 'adam', # utils/train.py for more trainer options
-    'filters': [32, 16, 32, 64], # the config is fed into the model constructor
-    'kernels': [9, 5, 5, 3],
-    'preprocess': 'binarize', # this further preprocesses the data before training
-    'override_output_NL': True, # this overrides the output nonlinearity of the model according to the loss
+    'filters': [20, 20, 20, 20], # the config is fed into the model constructor
+    'kernels': [11, 11, 11, 11],
+    'preprocess': [],# this further preprocesses the data before training
+    'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss,
+    'pretrained_core': None,
+    'defrost': False,
+    'batch_size': 1000,
 }
 
 # Here we make sure that the script can be run from the command line.
 if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
-    opt_names = ["name=", "seed=", "train=", "val=", "config=", "from_checkpoint", "overwrite", "device=", "session=", "loss=", "model=", "trainer=", "preprocess=", "override_NL"]
-    opts, args = getopt.getopt(argv,"n:s:oc:d:l:m:t:p:", opt_names)
+    opt_names = ["name=", "seed=", "train=", "val=", "config=", "from_checkpoint", "overwrite", "device=", "session=", "loss=", "model=", "trainer=", "preprocess=", "override_NL", "pretrained_core=", "defrost", "batch_size="]
+    opts, args = getopt.getopt(argv,"n:s:oc:d:l:m:t:p:b:", opt_names)
     for opt, arg in opts:
         if opt in ("-n", "--name"):
             run_name = arg
@@ -66,6 +69,14 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
             config["preprocess"] = arg
         elif opt in ("--override_NL"):
             config["override_output_NL"] = True
+        elif opt in ("--session"):
+            session_name = arg
+        elif opt in ("--pretrained_core"):
+            config["pretrained_core"] = arg
+        elif opt in ("--defrost"):
+            config["defrost"] = True
+        elif opt in ("-b", "--batch_size"):
+            config["batch_size"] = int(arg)
             
 #%%
 # Prepare helpers for training.
@@ -75,6 +86,8 @@ print('Device: ', device)
 config['seed'] = seed
 dirname = os.path.join(os.getcwd(), 'data')
 checkpoint_dir = os.path.join(dirname, 'models', run_name)
+if config['pretrained_core'] is not None:
+    pretrained_dir = os.path.join(dirname, 'models', config['pretrained_core'])
 data_dir = os.path.join(dirname, 'sessions', session_name)
 if not os.path.exists(checkpoint_dir):
     os.makedirs(checkpoint_dir)
@@ -94,7 +107,7 @@ config.update({
 # %%
 # Load data.
 train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val, path=data_dir)
-train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device)
+train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device, batch_size=config['batch_size'])
 
 #%%
 # Load model and preprocess data.
@@ -103,12 +116,24 @@ if from_checkpoint:
         model = dill.load(f).to(device)
 else:
     model = get_model(config)
+    if config['pretrained_core'] is not None:
+        with open(os.path.join(pretrained_dir, 'model.pkl'), 'rb') as f:
+            model_pretrained = dill.load(f).model.core.to(device)
+            for i in model_pretrained.parameters():
+                i.requires_grad = False
+            model.model.core = model_pretrained
+
+if config['defrost']:
+    for i in model.model.core.parameters():
+        i.requires_grad = True
 
 model.loss, nonlinearity = get_loss(config)
+if hasattr(model.loss, 'prepare_loss'):
+    model.loss.prepare_loss(train_data, cids=model.cids)
 if config['override_output_NL']:
     model.model.output_NL = nonlinearity
 
-if config['preprocess'] == 'binarize': # Binarize the data to eliminate r > 1.
+if 'binarize' in config['preprocess']: # Binarize the data to eliminate r > 1.
     inds2 = torch.where(train_data['robs'] > 1)[0]
     train_data['robs'][inds2 - 1] = 1
     train_data['robs'][inds2 + 1] = 1
@@ -117,10 +142,10 @@ if config['preprocess'] == 'binarize': # Binarize the data to eliminate r > 1.
     val_data['robs'][inds2 - 1] = 1
     val_data['robs'][inds2 + 1] = 1
     val_data['robs'][inds2] = 1
-elif config['preprocess'] == 'smooth':
+if 'smooth' in config['preprocess']:
     train_data['robs'] = utils.smooth_robs(train_data['robs'], smoothN=10)
     val_data['robs'] = utils.smooth_robs(val_data['robs'], smoothN=10)
-elif config['preprocess'] == 'zscore':
+if 'zscore' in config['preprocess']:
     train_data['robs'] = utils.zscore_robs(utils.smooth_robs(train_data['robs'], smoothN=10))
     val_data['robs'] = utils.zscore_robs(utils.smooth_robs(val_data['robs'], smoothN=10))
 
@@ -140,4 +165,4 @@ with open(os.path.join(checkpoint_dir, 'metadata.txt'), 'w') as f:
     }
     f.write(json.dumps(to_write, indent=2))
 with open(os.path.join(checkpoint_dir, 'config.pkl'), 'wb') as f:
-    dill.dump(config_original, f, 'wb')
+    dill.dump(config_original, f)

@@ -1,4 +1,4 @@
-import os
+import os, sys, getopt
 import gc
 import time
 import random
@@ -89,19 +89,14 @@ def get_datasets(train_data, val_data, device=None, val_device=None, batch_size=
     if val_device is None:
         val_device = device
     val_ds = GenericDataset(val_data, device=val_device) # we're okay with being slow
-
-    if train_ds.device.type=='cuda':
-        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle)
-    else:
-        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle, pin_memory=True, num_workers=os.cpu_count()//2)
-
-    to_shuffle = False or force_shuffle
-    if val_ds.device.type=='cuda':
-        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=to_shuffle)
-    else:
-        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=to_shuffle, pin_memory=True, num_workers=os.cpu_count()//2)
-
+    train_dl = get_dataloader(train_ds, batch_size=batch_size, shuffle=shuffle)
+    val_dl = get_dataloader(val_ds, batch_size=batch_size, shuffle=False or force_shuffle)
     return train_dl, val_dl, train_ds, val_ds
+
+def get_dataloader(dataset, batch_size=1000, shuffle=True):
+    if dataset.device.type=='cuda':
+        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=os.cpu_count()//2)
 
 def unpickle_data(nsamples_train=None, nsamples_val=None, device="cpu", path=None):
     '''
@@ -223,3 +218,53 @@ def plot_transients_np(model, val_data, stimid=0, maxsamples=120):
     plt.show()
 
     return sta_true, sta_hat, fig
+
+def get_opt_dict(opt_config):
+    """
+        Takes in a list of tuples, where each tuple is one of four options:
+        1. (-shorthand:, --option=, func) which applies a function on the argument
+        2. (-shorthand:, --option=) which does not apply a function on the argument
+        3. (-shorthand, --option, default) which sets argument to default
+        4. (-shorthand, --option) which sets argument to True
+    """
+    argv = sys.argv[1:]
+    opt_names = [i[1] for i in opt_config if i[1]]
+    opt_shorthand = [i[0] for i in opt_config if i[0]]
+    opts, args = getopt.getopt(argv, "".join(opt_shorthand), opt_names)
+    opts_dict = {}
+    opt_names = ['--'+str(i[1]).replace('=', '') for i in opt_config]
+    opt_shorthand = ['-'+str(i[0]).replace(':', '') for i in opt_config]
+    for opt, arg in opts:
+        opt_tuple = opt_config[opt_names.index(opt) if opt in opt_names else opt_shorthand.index(opt)]
+        opt_name = (opt_tuple[1] or opt_tuple[0])
+        if '=' in opt_name or ':' in opt_name:
+            opt_func = opt_tuple[2] if len(opt_tuple) > 2 else lambda x: x
+            opts_dict[opt_name.replace('=', '').replace(':', '')] = (opt_func or (lambda x: x))(arg)
+        else:
+            opts_dict[opt_name] = opt_tuple[2] if len(opt_tuple) > 2 else True
+    return opts_dict
+
+def uneven_tqdm(iterable, total, get_len=lambda x: len(x["robs"]), **kwargs):
+    """
+        tqdm that works with uneven lengths of iterable and total
+    """
+    pbar = tqdm(total=total, **kwargs)
+    for i in iterable:
+        yield i
+        pbar.update(get_len(i))
+    pbar.close()
+    
+def reclass(obj, new_class_object=None):
+    """
+        Reclass an object to a new class
+    """
+    if new_class_object is None:
+        try:
+            new_class_object = globals()[obj.__class__.__name__]()
+        except:
+            print("if you are not providing an instance of the new class, you must ensure your new class is available in the global namespace.")
+            print("Possibly cannot find class %s. make sure its imported directly." %obj.__class__.__name__)
+            print("ensure that class __init__ works when not entering any arguments")
+    for k, v in vars(obj).items():
+        setattr(new_class_object, k, v)        
+    return new_class_object

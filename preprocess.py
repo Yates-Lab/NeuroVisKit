@@ -21,6 +21,11 @@ from matplotlib.backends.backend_pdf import PdfPages
 seed_everything(0)
 
 device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+# '20220216', '20220601', '20220610', '20220805', '20210525', '20191119', '20191120a', '20191121', '20191122', '20191202', '20191205', '20191206', '20191209', '20191210', '20191220', '20191223', '20191226', '20191226', '20191230', '20191231', '20200106', '20200107', '20200109', '20200110', '20200115', '20200226', '20200304'
+# to try ['20200304', '20191206', '20191205', '20191122', '20191121', '20191120a', '20191119', '20220610', '20220601']
+# for now ['20200304', '20191206', '20191205', '20191121', '20191120a'] #these are kilo '20220610', '20220601'
+# didnt work: '20191231', '20191122', '20191119', 
+
 session_name = '20200304'
 num_lags = 24
 train_shifter = False
@@ -28,10 +33,11 @@ datadir = [
     '/Data/stim_movies/',
     '/mnt/Data/Datasets/MitchellV1FreeViewing/stim_movies/'
     ][0]
+spike_sorting = 'kilowf'
 
-if __name__ == "__main__" and hasattr(__main__, 'get_ipython'):
+if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]
-    opts, args = getopt.getopt(argv,"t:s:l:p:d:",["train_shifter=", "session=", "lags=", "path=", "device="])
+    opts, args = getopt.getopt(argv,"t:s:l:p:d:",["train_shifter=", "session=", "lags=", "path=", "device=", "sorting="])
     for opt, arg in opts:
         if opt in ("-t", "--train_shifter"):
             train_shifter = arg.upper() == 'TRUE'
@@ -43,20 +49,25 @@ if __name__ == "__main__" and hasattr(__main__, 'get_ipython'):
             datadir = arg
         elif opt in ("-d", "--device"):
             device = torch.device(arg)
+        elif opt in ("--sorting"):
+            spike_sorting = arg
 
 WINDOW_SIZE = 35
 APPLY_SHIFTER = True
 TRAIN_FRAC = 0.85
 BATCH_SIZE = 1000
 SEED = 1234
-SPIKE_SORTING = 'kilowf'
+
 val_device = device # if you're cutting it close, put the validation set on the cpu
 sesslist = list(get_stim_list().keys())
 assert session_name in sesslist, "session name %s is not an available session" %session_name
 NBname = 'shifter_{}'.format(session_name)
 outdir = os.path.join(os.getcwd(), 'data', 'sessions', session_name)
 if not os.path.exists(outdir):
+    print('Creating directory: ', outdir)
     os.makedirs(outdir)
+else:
+    print("Saving to:", outdir)
 cp_dir = os.path.join(outdir, NBname)
 FRAC_DF_INCLUDE=0.2
 #%% Shifter Training
@@ -64,7 +75,7 @@ FRAC_DF_INCLUDE=0.2
     Training a new shifter.
 '''
 if train_shifter:
-    ds = utils.get_ds(Pixel, datadir, session_name, num_lags, SPIKE_SORTING)
+    ds = utils.get_ds(Pixel, datadir, session_name, num_lags, spike_sorting)
     stas, cids, gab_inds = utils.get_ds_analysis(ds, WINDOW_SIZE, FRAC_DF_INCLUDE)
 
     maxsamples = get_max_samples(ds, device)
@@ -238,7 +249,7 @@ if train_shifter:
     Preproces.
 '''
 # Get dataset object from data directory.
-ds = utils.get_ds(Pixel, datadir, session_name, num_lags, SPIKE_SORTING, load_shifters=APPLY_SHIFTER)
+ds = utils.get_ds(Pixel, datadir, session_name, num_lags, spike_sorting, load_shifters=APPLY_SHIFTER)
 
 # Analyze dataset.
 stas, cids, gab_inds = utils.get_ds_analysis(ds, WINDOW_SIZE, FRAC_DF_INCLUDE)

@@ -2,7 +2,8 @@ import torch
 import NDNT
 import torch.nn as nn
 import torch.nn.functional as F
-
+from tqdm import tqdm
+import numpy as np
 def get_prior(device='cpu'):
     prior = [0.0205, 0.0094, 0.0211, 0.0256, 0.044, 0.0276, 0.0335, 0.0319, 0.0312, 0.0412, 0.022, 0.0397, 0.0307, 0.0306, 0.0297, 0.0143, 0.0259, 0.0374, 0.0386, 0.0146, 0.0226, 0.0266, 0.0089, 0.0179, 0.0354, 0.0374, 0.0295, 0.011, 0.0227, 0.0195, 0.015, 0.0458, 0.0218, 0.0342, 0.037, 0.0833, 0.0573, 0.0263, 0.0173, 0.0365, 0.0405, 0.0143, 0.0192, 0.0396, 0.0169, 0.02, 0.027, 0.0304, 0.0205, 0.0426, 0.0232, 0.033, 0.0181, 0.0218, 0.02, 0.0202, 0.033, 0.022, 0.0267, 0.013, 0.0145, 0.1243]
     return torch.tensor(prior, device=device).unsqueeze(0)
@@ -66,6 +67,28 @@ def balanced_binary_cross_entropy_with_logits_f(pred, target, reduce=False, *arg
         pred, target, weight=w, reduction="mean" if reduce else "none"
     ) / 10
 
+class BitsPerSpikeLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.name = "bits_per_spike"
+        self.loss = poisson_f
+        self.Rsum = None
+        self.Tsum = None
+    
+    def prepare_loss(self, train_data, cids=None):
+        cids = np.arange(len(train_data['robs'])) if cids is None else cids
+        self.Rsum = (train_data['robs'][:, cids] * train_data['dfs'][:, cids]).mean(0).detach()
+        self.Tsum = train_data['dfs'][:, cids].mean(0).detach()
+    
+    def forward(self, pred, target, dfs):
+        self.Rsum, self.Tsum = self.Rsum.to(pred.device), self.Tsum.to(pred.device)
+        LLsum = (self.loss(pred, target, reduce=False) * dfs).mean(0)
+        LLneuron = LLsum/self.Rsum
+        rbar = self.Rsum/self.Tsum
+        LLnulls = torch.log(rbar)-1
+        LLneuron = -LLneuron - LLnulls
+        return -LLneuron.mean() / np.log(2)
+
 class DatafilterLossWrapper(nn.Module):
     '''
         Wrap a loss function to be used as a module, with data filters.
@@ -80,7 +103,7 @@ class DatafilterLossWrapper(nn.Module):
         if data_filters is None:
             return loss.mean()
         else:
-            return (loss * data_filters).sum() / (data_filters.sum()+eps)
+            return ((loss * data_filters).sum(0) / data_filters.sum(0).clamp(min=1)).mean()
         
 class LossFuncWrapper(nn.Module):
     '''
@@ -88,10 +111,10 @@ class LossFuncWrapper(nn.Module):
     '''
     def __init__(self, lossF_no_reduction, name):
         super().__init__()
-        self.loss_f = lossF_no_reduction
+        self.loss = lossF_no_reduction
         self.name = name
     def forward(self, pred, target, *args, **kwargs):
-        return self.loss_f(pred, target, reduce=True).mean()
+        return self.loss(pred, target, reduce=True).mean()
     
 class NDNTLossWrapper(nn.Module):
     '''
@@ -167,6 +190,84 @@ class NDNTLossWrapper(nn.Module):
                 unitloss = torch.sum( torch.mul(loss_full, data_filters), axis=0 )
         return unitloss
         # END PoissonLoss_datafilter.unit_loss
+        
+class ExperimentalNDNTLossWrapper(nn.Module):
+    '''
+        Wrap a loss module to allow NDNT functionality
+    '''
+    def __init__(self,loss_no_reduction, name, prior=None):
+        super().__init__()
+        self.name = name
+        self.loss = loss_no_reduction
+        self.unit_weighting = True
+        self.batch_weighting = 1
+        if prior is None:
+            prior = 1/get_prior().squeeze()
+            prior = prior / len(prior)
+        self.register_buffer('unit_weights', prior)  
+        self.register_buffer('av_batch_size', None) 
+
+    def set_loss_weighting( self, batch_weighting=None, unit_weighting=None, unit_weights=None, av_batch_size=None ):
+        if batch_weighting is not None:
+            self.batch_weighting = batch_weighting 
+        if unit_weighting is not None:
+            self.unit_weighting = unit_weighting 
+
+        if unit_weights is not None:
+            self.unit_weights = torch.tensor(unit_weights, dtype=torch.float32)
+
+        assert self.batch_weighting in [-1, 0, 1, 2], "LOSS: Invalid batch_weighting"
+        
+        if av_batch_size is not None:
+            self.av_batch_size = torch.tensor(av_batch_size, dtype=torch.float32)
+
+    def forward(self, pred, target, data_filters=None ):        
+        
+        unit_weights = torch.ones( pred.shape[1], device=pred.device)
+        if self.batch_weighting == 0:  # batch_size
+            unit_weights /= pred.shape[0]
+        elif self.batch_weighting == 1: # data_filters
+            assert data_filters is not None, "LOSS: batch_weighting requires data filters"
+            unit_weights = torch.reciprocal( torch.sum(data_filters, axis=0).clamp(min=1) )
+        elif self.batch_weighting == 2: # average_batch_size
+            unit_weights /= self.av_batch_size
+        # Note can leave as 1s if unnormalized
+
+        if self.unit_weighting:
+            unit_weights *= self.unit_weights.to(pred.device)
+
+        if data_filters is None:
+            # Currently this does not apply unit_norms
+            loss = self.loss(pred, target).mean()
+        else:
+            loss_full = self.loss(pred, target)
+            # divide by number of valid time points
+            
+            loss = torch.sum(torch.mul(unit_weights, torch.mul(loss_full, data_filters))) / len(unit_weights)
+        return loss
+    # END PoissonLoss_datafilter.forward
+
+    def unit_loss(self, pred, target, data_filters=None, temporal_normalize=True ):        
+        """This should be equivalent of forward, without sum over units
+        Currently only true if batch_weighting = 'data_filter'"""
+
+        if data_filters is None:
+            unitloss = torch.sum(
+                self.loss(pred, target),
+                axis=0)
+        else:
+            loss_full = self.loss(pred, target)
+
+            unit_weighting = 1.0/torch.maximum(
+                torch.sum(data_filters, axis=0),
+                torch.tensor(1.0, device=data_filters.device) )
+
+            if temporal_normalize:
+                unitloss = torch.mul(unit_weighting, torch.sum( torch.mul(loss_full, data_filters), axis=0) )
+            else:
+                unitloss = torch.sum( torch.mul(loss_full, data_filters), axis=0 )
+        return unitloss
+        # END PoissonLoss_datafilter.unit_loss
     
 LOSS_DICT = {
     'mse': NDNTLossWrapper(mse_f, "mse"),
@@ -180,10 +281,12 @@ LOSS_DICT = {
     'ce_logits': NDNTLossWrapper(binary_cross_entropy_with_logits_f, "ce_logits"),
     'bce_logits': NDNTLossWrapper(balanced_binary_cross_entropy_with_logits_f, "bce_logits"),
     'torch_poisson': LossFuncWrapper(poisson_f, "torch_poisson"),
+    'experimental': ExperimentalNDNTLossWrapper(poisson_f, "experimental"),
+    'bits_per_spike': BitsPerSpikeLoss(),
 }
 
 NONLINEARITY_DICT = {
-    **{k: nn.Softplus() for k in ['poisson', 'pearson', 'torch_poisson']},
+    **{k: nn.Softplus() for k in ['poisson', 'pearson', 'torch_poisson', 'experimental', 'bits_per_spike']},
     **{k: nn.Sigmoid() for k in ['ce', 'bce', 'f1']},
     **{k: nn.Identity() for k in ['mse', 'smse', 'bsmse', 'ce_logits', 'bce_logits']},
 }
@@ -191,6 +294,8 @@ NONLINEARITY_DICT = {
 def get_loss(config):
     return LOSS_DICT[config['loss']], NONLINEARITY_DICT[config['loss']]
 
+def get_loss_from_name(name):
+    return LOSS_DICT[name]
 
 # class robust_loss():
 #     def __init__(self):
