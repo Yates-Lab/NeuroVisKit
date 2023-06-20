@@ -10,7 +10,7 @@ import NDNT
 import numpy as np
 import dill
 import os, sys, getopt, __main__
-from utils.utils import unpickle_data, get_datasets, plot_transients, seed_everything, TimeLogger, get_opt_dict
+from utils.utils import unpickle_data, get_datasets, plot_transients, seed_everything, TimeLogger, get_opt_dict, uneven_tqdm
 from models.utils import plot_stas
 import utils.postprocess as utils
 import utils.lightning as lutils

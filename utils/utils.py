@@ -243,3 +243,28 @@ def get_opt_dict(opt_config):
         else:
             opts_dict[opt_name] = opt_tuple[2] if len(opt_tuple) > 2 else True
     return opts_dict
+
+def uneven_tqdm(iterable, total, get_len=lambda x: len(x["robs"]), **kwargs):
+    """
+        tqdm that works with uneven lengths of iterable and total
+    """
+    pbar = tqdm(total=total, **kwargs)
+    for i in iterable:
+        yield i
+        pbar.update(get_len(i))
+    pbar.close()
+    
+def reclass(obj, new_class_object=None):
+    """
+        Reclass an object to a new class
+    """
+    if new_class_object is None:
+        try:
+            new_class_object = globals()[obj.__class__.__name__]()
+        except:
+            print("if you are not providing an instance of the new class, you must ensure your new class is available in the global namespace.")
+            print("Possibly cannot find class %s. make sure its imported directly." %obj.__class__.__name__)
+            print("ensure that class __init__ works when not entering any arguments")
+    for k, v in vars(obj).items():
+        setattr(new_class_object, k, v)        
+    return new_class_object
