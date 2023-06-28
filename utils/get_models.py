@@ -131,16 +131,17 @@ class gaborC(nn.Module):
     #assumes input has been preprocessed with gabors
     def __init__(self, cids, nl=nn.Softplus()):
         super().__init__()
-        self.nfilters = moten.get_default_pyramid(vhsize=(70, 70), fps=45).nfilters
+        self.nfilters = 28084#moten.get_default_pyramid(vhsize=(70, 70), fps=45).nfilters
         self.cids = cids
         self.linear = nn.Linear(self.nfilters, len(cids))
-        self.linear.bias.data = torch.zeros_like(self.linear.bias.data)
+        # self.linear.weight.data = torch.zeros_like(self.linear.weight.data)
+        # self.linear.bias.data = torch.zeros_like(self.linear.bias.data)
         self.lag = 0
         self.output_NL = nl
     def forward(self, x):
         return self.output_NL(self.linear(x["stim"]))
     def compute_reg_loss(self, *args, **kwargs):
-        return torch.abs(self.linear.weight).mean()
+        return torch.abs(self.linear.weight).mean()*10
     def prepare_model(self, train_dl, *args, **kwargs):
         if True:
             data = dl_to_data(train_dl)
@@ -345,21 +346,21 @@ def get_separable_cnn(config_init):
 #         return cnn
 #     return get_attention_cnn_helper
 
-class PytorchWrapper(ModelWrapper):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-    def compute_reg_loss(self, *args, **kwargs):
-        return 0
-    def prepare_regularization(self, normalize_reg=False):
-        return 0
-    def forward(self, x, pass_dict=False, *args, **kwargs):
-        if type(x) is dict and not pass_dict:
-            x = x['stim']
-        if x.ndim == 3:
-            x = x.unsqueeze(1)
-        if x.ndim == 4:
-            x = x.unsqueeze(1)
-        return self.model(x, *args, **kwargs)
+# class PytorchWrapper(ModelWrapper):
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
+#     def compute_reg_loss(self, *args, **kwargs):
+#         return 0
+#     def prepare_regularization(self, normalize_reg=False):
+#         return 0
+#     def forward(self, x, pass_dict=False, *args, **kwargs):
+#         if type(x) is dict and not pass_dict:
+#             x = x['stim']
+#         if x.ndim == 3:
+#             x = x.unsqueeze(1)
+#         if x.ndim == 4:
+#             x = x.unsqueeze(1)
+#         return self.model(x, *args, **kwargs)
 
 def get_cnn(config_init):
     def get_cnn_helper(config, device='cpu'):
