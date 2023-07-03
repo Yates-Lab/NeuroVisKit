@@ -14,11 +14,18 @@ from tqdm import tqdm
 class TimeLogger():
     def __init__(self):
         self.timer = time.time()
+        self.accumulated = 0
     def reset(self):
+        self.accumulated += time.time() - self.timer
         self.timer = time.time()
     def log(self, msg):
         print(f'{msg} {(time.time() - self.timer):.1f}s')
         self.timer = time.time()
+    def closure(self):
+        self.reset()
+        m, s = int(self.accumulated//60), self.accumulated%60
+        self.log(f'Total run took {m}m {s}s')
+        self.accumulated = 0
         
 def to_device(x, device='cpu'):
     if torch.is_tensor(x):

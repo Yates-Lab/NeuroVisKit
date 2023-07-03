@@ -276,4 +276,5 @@ for fig in [plt.figure(n) for n in plt.get_fignums()]:
     fig.savefig(pdf_file, format='pdf')
 pdf_file.close()
 logger.log('Saved results as pdf.')
+logger.closure()
 # %%
