@@ -1,12 +1,14 @@
 import os, dill, sys, shutil, json, io, contextlib
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler, Dataset
 import lightning as pl
 from lightning.pytorch.callbacks import LearningRateFinder
 import math
 import numpy as np
 import utils.get_models as get_models
+from utils.utils import to_device
 import moten
 
 def time_embedding(x, num_lags):
@@ -16,6 +18,27 @@ def time_embedding(x, num_lags):
     assert len(tensorlist) != 0, x.shape
     out = torch.stack(tensorlist, dim=0)
     return out.permute(0,2,1).reshape(len(out), -1)
+
+def pad_to_shape(x, shape, padding_mapper=lambda x: [0, x]):
+    padding = []
+    for x_dim, target_dim in zip(x.shape[::-1], shape[::-1]):
+        padding.extend(padding_mapper(max(target_dim - x_dim, 0)))
+    return F.pad(x, padding)
+
+# def time_embeddingC(batch, num_lags):
+#     out = {
+#         "stim": [],
+#         "dfs": [],
+#         "robs": [],
+#     }
+#     stim = torch.concat((torch.zeros((batch["stim"].shape)), batch["stim"]), dim=0)
+#     for i in range(len(batch["stim"])):
+#         stim = batch["stim"][i:i+num_lags]
+        
+#     batch["stim"] = time_embedding(batch["stim"].flatten(1), num_lags)
+#     batch["dfs"] = batch["dfs"][num_lags-1:]
+#     batch["robs"] = batch["robs"][num_lags-1:]
+#     return batch
 
 def get_embed_function(num_lags=36):
     def embed(x):
@@ -228,12 +251,6 @@ class IterableDataloader():
         self.iterable = iterable
     def __iter__(self):
         return iter(self.iterable)
-    
-def to_device(x, device='cpu'):
-    if isinstance(x, dict):
-        return {k: to_device(v, device=device) for k,v in x.items()}
-    else:
-        return x.to(device)
 
 def get_fix_dataloader_preload(ds, inds, batch_size=1, num_workers=os.cpu_count()//2, device='cpu'):
     dl = get_fix_dataloader(ds, inds, batch_size=batch_size, num_workers=num_workers)

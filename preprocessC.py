@@ -103,7 +103,7 @@ ds = FixationMultiDataset(sess_list=session_name.split('_'),
     requested_stims=['Gabor', 'Dots', 'Grating', 'BackImage'],
     downsample_s=1,
     downsample_t=1,
-    num_lags=36,
+    num_lags=num_lags,
     num_lags_pre_sac=40,
     spike_sorting=spike_sorting,
     saccade_basis = None,
@@ -198,6 +198,7 @@ session = {
     'input_dims': ds.dims + [num_lags],
     'train_inds': train_inds,
     'val_inds': val_inds,
+    'num_lags': num_lags,
 }
 with open(os.path.join(outdir, 'session.pkl'), 'wb') as f:
     dill.dump(session, f)

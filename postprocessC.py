@@ -10,7 +10,7 @@ import NDNT
 import numpy as np
 import dill
 import os, sys, getopt, __main__
-from utils.utils import unpickle_data, get_datasets, plot_transients, seed_everything, TimeLogger, get_opt_dict, uneven_tqdm
+from utils.utils import unpickle_data, get_datasets, plot_transientsC, seed_everything, TimeLogger, get_opt_dict, uneven_tqdm, to_device
 from models.utils import plot_stas
 import utils.postprocess as utils
 import utils.lightning as lutils
@@ -20,16 +20,18 @@ from utils.loss import NDNTLossWrapper
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
 from datasets.mitchell.pixel.fixation import FixationMultiDataset
+from matplotlib.animation import FuncAnimation
+from utils.mei import irfC
+import matplotlib.animation as animation
 seed_everything(0)
 
 config = {
-    'batch_size': 3,
     'device': torch.device('cuda:1' if torch.cuda.is_available() else 'cpu'),
     'session': '20200304C',
-    'name': 'testC_lr_new',
-    'pytorch': False,
+    'name': 'cnnc',
+    # 'pytorch': False,
     'fast': False,
-    'load_preprocessed': False,
+    # 'load_preprocessed': False,
 }
 
 # Here we make sure that the script can be run from the command line.
@@ -38,10 +40,9 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
         ('n:', 'name='),
         ('d:', 'device=', torch.device),
         ('s:', 'session='),
-        ('p', 'pytorch'),
+        # ('p', 'pytorch'),
         ('f', 'fast'),
-        ('b:', 'batch_size=', int),
-        ('l', 'load_preprocessed'),
+        # ('l', 'load_preprocessed'),
     ])
     config.update(loaded_opts)
 
@@ -67,108 +68,105 @@ with open(dirs["config_path"], 'r') as f:
 cids = session['cids']
 model = model.to(device)
 model.model = model.model.to(device)
-if not config['pytorch']:
-    core = model.model.core
-input_dims = session['input_dims'][1:]
+core = model.model.core if hasattr(model.model, 'core') else None
+readout = model.model.readout if hasattr(model.model, 'readout') else None
+c, x, y, num_lags = session['input_dims']
 logger.log('Loaded model.')
 
 #%%
-if config['load_preprocessed']:
-    with open(os.path.join(dirs["session_dir"], 'preprocessed.pkl'), 'rb') as f:
-        ds = dill.load(f)
-else:
-    ds = FixationMultiDataset.load(dirs["ds_dir"])
-    ds.use_blocks = True
-if train_config["trainer"] == "lbfgs":
-    train_dl = iter([ds[session["train_inds"]]])
-    val_dl = iter([ds[session["val_inds"]]])
-else:
-    train_dl = lutils.get_fix_dataloader_preload(ds, session["train_inds"], batch_size=config['batch_size'], device=device)
-    val_dl = lutils.get_fix_dataloader_preload(ds, session["val_inds"], batch_size=config['batch_size'], device=device)
+ds = FixationMultiDataset.load(dirs["ds_dir"])
+ds.use_blocks = False
+val_inds = ds.block_inds_to_fix_inds(session["val_inds"])
+val_dl = lutils.get_fix_dataloader(ds, val_inds, batch_size=1)
 #%% 
-# Evaluate model and plot first layer.
-isNDNT = isinstance(model.loss, NDNTLossWrapper)
-if not isNDNT:
-    model.loss = NDNT.metrics.poisson_loss.PoissonLoss_datafilter()
+# Evaluate model
+model.loss = NDNT.metrics.poisson_loss.PoissonLoss_datafilter()
 ev = utils.eval_model_summary(model, val_dl)
 best_cids = ev.argsort()[::-1]
-if not config["pytorch"]:
-    utils.plot_layer(core[0])
 logger.log('Evaluated model.')
 
 #%%
-try:
-    # check if model requires flattened input
-    try:
-        utils.get_zero_irf(input_dims, model, 0, device)
-        model_input_shape = input_dims
-    except Exception as e:
-        model_input_shape = (np.prod(input_dims),)
-        
-    zero_irfs = []
-    for cc in best_cids:
-        z = utils.get_zero_irf(model_input_shape, model, cc, device).reshape(input_dims).permute(2, 0, 1)
-        zero_irfs.append(z / torch.amax(torch.abs(z)))
-    irf_powers = torch.stack(zero_irfs).pow(2).mean((1, 2))
-    #plot irf powers for each neuron
-    plt.figure(figsize=(10, len(best_cids)))
-    plt.suptitle('IRF Powers')
-    for i in range(len(best_cids)):
-        plt.subplot(len(best_cids), 1, i+1)
-        plt.plot(irf_powers[best_cids[i]], label=best_cids[i])
-        plt.ylim(0, irf_powers.max())
-        plt.legend(loc='upper right')
-    plt.tight_layout()
+# zero irfs shape (neuron, time, 1, x, y)
+zero_irfs = torch.stack(
+    [
+        utils.get_zero_irfC(
+            (num_lags, c, x, y),
+            model, cc, device
+        ) for cc in tqdm(best_cids, desc='Calculating zero IRFs')
+    ], dim=0
+).squeeze(2)
+zero_irfs = zero_irfs / torch.abs(zero_irfs).amax((1, 2, 3), keepdim=True)
+irf_powers = zero_irfs.pow(2).mean((2, 3))
+#plot irf powers for each neuron
+plt.figure(figsize=(10, len(best_cids)))
+plt.suptitle('IRF Powers')
+for i in tqdm(range(len(best_cids)), desc='Plotting IRF Powers'):
+    plt.subplot(len(best_cids), 1, i+1)
+    plt.plot(irf_powers[best_cids[i]], label=best_cids[i])
+    # plt.ylim(0, irf_powers.max())
+    plt.legend(loc='upper right')
+plt.tight_layout()
 
-    fig = utils.plot_grid(zero_irfs, vmin=-1, vmax=1, titles=best_cids, suptitle='Zero IRFs')
-    del zero_irfs
-    #%%
-    from matplotlib.animation import FuncAnimation
-    from utils.mei import irf
-    import matplotlib.animation as animation
-
-    n = 240*10 # length of movie in frames
-    win = 240*2
-    offset = min(40000, len(val_data["stim"])-n-win)#44137 # index of initial frame
-    movie_cid_list = [] if config["fast"] else best_cids[:3]
-    for cc in movie_cid_list:
-        cc_original = cids[cc]
-        stims = val_data["stim"][offset:offset+n+win].reshape(-1, *input_dims).squeeze()
-        robs = val_data["robs"][offset:offset+n+win, cc_original]
-        is_saccade = val_data["fixation_num"][offset:offset+n+win] != val_data["fixation_num"][offset-1:offset-1+n+win]
-        rfs = irf({"stim": stims.reshape(-1, *model_input_shape)}, model, cc).reshape(-1, *input_dims).squeeze()
-        probs = model({"stim": stims.reshape(-1, *model_input_shape)})[:, cc]
-        stims = stims[:, 20, :, :]
-        rfs = rfs[:, 20, :, :]
-        rfs = rfs / torch.amax(torch.abs(rfs), keepdim=True, axis=(1, 2))
-
-        stims = stims.detach().cpu().numpy()
-        robs = robs.detach().cpu().numpy()
-        is_saccade = is_saccade.detach().cpu().numpy()
-        rfs = rfs.detach().cpu().numpy()
-        probs = probs.detach().cpu().numpy()
-
+fig = utils.plot_grid(zero_irfs, vmin=-1, vmax=1, titles=best_cids, suptitle='Zero IRFs')
+del zero_irfs, irf_powers
+torch.cuda.empty_cache()
+#%%
+if not config["fast"]:
+    win = 240*2 # length of window in frames
+    offset = 10 # index of initial fixation
+    nfixations = 50 # number of fixations to plot
+    slice_ind = 20 # column index to plot
+    ncids = 3 # number of neurons to plot (sorted by bits per spike)
+    assert len(val_inds) > offset + nfixations, "hit end of dataset when animating IRFs"
+    irf_dl = lutils.get_fix_dataloader(ds, val_inds[offset:offset+nfixations], batch_size=1)
+    val_data_slice = ds[val_inds[offset:offset+nfixations]]
+    stims, robs, dfs = val_data_slice["stim"], val_data_slice["robs"], val_data_slice["dfs"]
+    fixation_ind = [ind for ind in val_inds[offset:offset+nfixations] for _ in range(len(ds[ind]))]
+    is_saccade = [False] + (np.diff(fixation_ind) != 0).tolist()
+    movie_cid_list = list(best_cids[:ncids])
+    cc_originals = [cids[cc] for cc in movie_cid_list]
+    rfs, robs_hat = [[] for _ in movie_cid_list], [[] for _ in movie_cid_list]
+    logger.log('Calculating IRFs over validation dataset.')
+    for i, batch in tqdm(enumerate(irf_dl), desc='Batch', total=len(irf_dl)):
+        batch = to_device(batch, device)
+        outp = model(batch).cpu()
+        for cc_ind in tqdm(range(len(movie_cid_list)), leave=False, desc='Neuron'):
+            temp = irfC(batch, model, movie_cid_list[cc_ind], num_lags).cpu().reshape(len(batch["stim"])-num_lags+1, num_lags, x, y)[..., slice_ind]
+            temp = torch.cat((torch.zeros(num_lags-1, num_lags, x), temp), dim=0)
+            rfs[cc_ind].append(temp)
+            robs_hat[cc_ind].append(outp[:, cc_originals[cc_ind]].detach().clone())
+        del batch, outp
+        torch.cuda.empty_cache()
+    logger.log('Animating IRFs.')
+    stims = stims[..., slice_ind].detach().cpu().numpy()
+    robs_hat = torch.stack([torch.concat(i, dim = 0) for i in robs_hat], dim=1).detach().cpu().numpy()
+    robs = robs[:, movie_cid_list].cpu().numpy()
+    dfs = dfs[:, movie_cid_list].cpu().numpy()
+    rfs = torch.stack([torch.concat(i, dim = 0) for i in rfs], dim=-1).squeeze(2).permute(0, 2, 1, 3)
+    rfs = (rfs/torch.abs(rfs).amax((0, 1, 2), keepdim=True)).detach().cpu().numpy()
+    for cc_ind, cc in enumerate(movie_cid_list):
+        cc_original = cc_originals[cc_ind]
         fig = plt.figure()
         plt.suptitle('Frame 0')
         plt.subplot(3, 1, 1)
         plt.title('Stimulus')
-        im1 = plt.imshow(np.zeros((35, win)), cmap='viridis', aspect='auto', animated=True, vmin=-1, vmax=1)
+        im1 = plt.imshow(np.zeros((x, win)), cmap='viridis', aspect='auto', animated=True, vmin=-1, vmax=1)
         im1a = plt.gca()
         plt.yticks([])
         plt.xticks([])
         plt.subplot(3, 3, 6)
         plt.title('IRF')
-        im2 = plt.imshow(np.zeros((35, 24)), cmap='viridis', aspect='auto', animated=True, vmin=-1, vmax=1)
+        im2 = plt.imshow(np.zeros((x, num_lags)), cmap='viridis', aspect='auto', animated=True, vmin=-1, vmax=1)
         im2a = plt.gca()
         plt.yticks([])
         plt.xticks([])
         plt.subplot(3, 1, 3)
         plt.title('Response')
-        x = np.arange(1, win+1)
-        pl1, = plt.plot(x, np.zeros(win), label='true', c='blue')
-        pl2, = plt.plot(x, np.zeros(win), label='pred', c='red')
+        x_vals = np.arange(1, win+1)
+        pl1, = plt.plot(x_vals, np.zeros(win), label='true', c='blue')
+        pl2, = plt.plot(x_vals, np.zeros(win), label='pred', c='red')
         pla = plt.gca()
-        plt.ylim(np.min([robs.min(), probs.min()]), np.max([robs.max(), probs.max()]))
+        plt.ylim(np.min([robs[:, cc_ind].min(), robs_hat[:, cc_ind].min()]), np.max([robs[:, cc_ind].max(), robs_hat[:, cc_ind].max()]))
         plt.xlim(0, 23)
         plt.legend(loc='upper right')
         plt.tight_layout()
@@ -179,17 +177,17 @@ try:
             fig.suptitle(f'Neuron {cc_original} ({cc}th cid), Frame {j}')
             i = j + win
             im1.set_data(stims[j:i, :, 0].T)
-            im2.set_data(rfs[i, :, ::-1])
-            x = np.arange(j, i)
+            im2.set_data(rfs[i, :, ::-1, cc_ind])
+            x_vals = np.arange(j, i)
 
             pla.set_xlim(j, i)
             pl1.set_data(
-                x,
-                robs[j:i],
+                x_vals,
+                robs[j:i, cc_ind],
             )
             pl2.set_data(
-                x,
-                probs[j:i],
+                x_vals,
+                robs_hat[j:i, cc_ind],
             )
 
             sacticks = saccade_id[np.logical_and(saccade_id > j, saccade_id < i)]
@@ -204,18 +202,23 @@ try:
         anim = FuncAnimation(
             fig,
             animate,
-            frames = n,
-            interval = int(n/fps),
+            frames = len(stims)-win,
+            interval = int((len(stims)-win)/fps),
             blit=True
         )
 
         anim.save(tosave_path+'_video_cid%d.mp4'%cc_original, writer = animation.FFMpegWriter(fps=fps))
-        del stims, robs, is_saccade, rfs, probs
-except Exception as e:
-    logger.log('Failed in IRFs: %s'%e)
+    del stims, robs, is_saccade, rfs, robs_hat, val_data_slice
+    torch.cuda.empty_cache()
+    logger.log('Animated IRFs.')
 #%%    
+try:
+    is_ndnt_plottable = hasattr(core[0], 'get_weights') and readout is not None
+except:
+    is_ndnt_plottable = False
+    
 # Plot spatiotemporal first layer kernels.
-if not config["pytorch"] and not config["fast"]:
+if is_ndnt_plottable and not config["fast"]:
     w_normed = utils.zscoreWeights(core[0].get_weights()) #z-score weights per neuron for visualization
     plot_sta_movie(w_normed, frameDelay=1, path=tosave_path+'_weights2D.gif', cmap='viridis')
     # plot_sta_movie(w_normed, frameDelay=1, path=tosave_path+'_weights3D.gif', threeD=True, cmap='viridis')
@@ -238,14 +241,13 @@ if not config["pytorch"] and not config["fast"]:
 # %%
 # Plot transients.
 try:
-    sta_true, sta_hat, _ = plot_transients(model, ds[session["val_inds"]], device="cpu")
-    # sta_true, sta_hat (n saccades, n timepoints, n neurons)
+    sta_true, sta_hat, _ = plot_transientsC(model, val_dl, cids, num_lags)
     logger.log('Plotted transients.')
 except Exception as e:
     logger.log('Failed in transients: %s'%e)
 
 #%%
-if not config["pytorch"] and hasattr(model.model, 'readout'):
+if is_ndnt_plottable:
     utils.plot_model(model.model)
     logger.log('Plotted model.')
 

@@ -20,6 +20,15 @@ class TimeLogger():
         print(f'{msg} {(time.time() - self.timer):.1f}s')
         self.timer = time.time()
         
+def to_device(x, device='cpu'):
+    if torch.is_tensor(x):
+        return x.to(device)
+    elif isinstance(x, dict):
+        return {k: to_device(v, device=device) for k,v in x.items()}
+    elif isinstance(x, list):
+        return [to_device(v, device=device) for v in x]
+    return x
+        
 def plot_stim(stim, fig=None, title=None, subplot_shape=(1, 1)):
     if fig is None:
         plt.figure()
@@ -179,6 +188,42 @@ def plot_transients(model, val_data, stimid=0, maxsamples=120, device=None):
     plt.show()
 
     return sta_true, sta_hat, fig
+
+def plot_transientsC(model, val_dl, cids, num_lags):
+    # val_dl must have batch size 1 and ds must have use_blocks = False
+    Nfix = len(val_dl)
+    n = []
+    nbins = 120
+    NC = len(cids)
+    start = 0
+    rsta = np.nan*np.ones( (Nfix, nbins, NC))
+    dfs = np.nan*np.ones( (Nfix, nbins, NC))
+    rhat = np.nan*np.ones( (Nfix, nbins, NC))
+    esta = np.nan*np.ones( (Nfix, nbins, 2))
+    for i,batch in enumerate(val_dl):
+        batch = to_device(batch, next(model.parameters()).device)
+        n_ = batch['eyepos'].shape[0]
+        n.append(n_)
+        nt = np.minimum(n_, nbins)
+        yhat = model(batch)
+        dfs[i,start:nt,:] = batch['dfs'][start:nt,cids].cpu()
+        esta[i,start:nt,:] = batch['eyepos'][start:nt,:].cpu()
+        rsta[i,start:nt,:] = batch['robs'][start:nt,cids].cpu()
+        rhat[i,start:nt,:] = yhat[start:nt,:].detach().cpu().numpy()
+        del batch
+        
+    sx = int(np.ceil(np.sqrt(NC)))
+    sy = int(np.round(np.sqrt(NC)))
+
+    f = plt.figure(figsize=(10,10))
+    for cc in range(NC):
+        plt.subplot(sx,sy,cc+1)
+        plt.plot(np.nansum(rsta[:,:,cc]*dfs[:,:,cc], axis=0)/np.nansum(dfs[:,:,cc]), 'k')
+        plt.plot(np.nansum(rhat[:,:,cc]*dfs[:,:,cc], axis=0)/np.nansum(dfs[:,:,cc]), 'r')
+        plt.xlim([num_lags, nbins])
+        plt.axis('off')
+        plt.title(cc)
+    return rsta, rhat, f
 
 def plot_transients_np(model, val_data, stimid=0, maxsamples=120):
     sacinds = np.where( (val_data['fixation_onset'][:,0] * (val_data['stimid'][:,0]-stimid)**2) > 1e-7)[0]

@@ -7,7 +7,7 @@ import numpy as np
 import json, yaml
 import torch
 import dill
-from utils.utils import seed_everything, unpickle_data, get_datasets, get_opt_dict
+from utils.utils import seed_everything, unpickle_data, get_datasets, get_opt_dict, to_device
 from utils.loss import get_loss
 from datasets.mitchell.pixel import FixationMultiDataset
 from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler
@@ -36,7 +36,7 @@ config_defaults = {
     'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss,
     'pretrained_core': None,
     'defrost': False,
-    'batch_size': 3,
+    'batch_size': 2,
     'seed': 420,
     'device': '1,',
     'session': '20200304C',
@@ -127,7 +127,7 @@ if config['compile']:
 # for i in tqdm(train_dl):
 #     i["robs"] = i["robs"][35:]
 #     i["dfs"] = i["dfs"][35:]
-#     loss = model.wrapped_model.training_step(utils.to_device(i, torch.device("cuda:1")))["loss"]
+#     loss = model.wrapped_model.training_step(to_device(i, torch.device("cuda:1")))["loss"]
 #     opt.zero_grad()
 #     loss.backward()
 #     opt.step()
@@ -136,8 +136,8 @@ if config['compile']:
 callbacks = [
     EarlyStopping(monitor='val_loss', patience=30, verbose=1, mode='min'),
 ]
-if not config["fast"]:
-    callbacks.append(utils.LRFinder(num_training_steps=200))
+# if not config["fast"]:
+#     callbacks.append(utils.LRFinder(num_training_steps=200))
 trainer_args = {
     "callbacks": [
         *(callbacks if config["trainer"] != "lbfgs" else []),
@@ -175,11 +175,9 @@ with open(dirs["config_path"], 'w') as f:
         if hasattr(to_write[i], "tolist"):
             to_write[i] = to_write[i].tolist()
     f.write(json.dumps(to_write, indent=2))
-try:
+
+if not config["compile"]:
     with open(dirs["model_path"], 'wb') as f:
         dill.dump(PLWrapper.load_from_config_path(dirs["config_path"]), f)
         print('Model pickled.')
-except Exception as e:
-    print('Failed to pickle model.')
-    print(e)
 # %%

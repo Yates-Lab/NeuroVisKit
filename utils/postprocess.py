@@ -10,8 +10,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from . import utils
-from .mei import irf, get_gratings
+from .mei import irf, get_gratings, irfC
 from .cluster import corr_dist, cos_dist
+from .utils import to_device
 from scipy.signal import find_peaks
 
 class Loader():
@@ -54,7 +55,7 @@ def plot_grid(mat, titles=None, vmin=None, vmax=None, **kwargs):
     
     fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(2*m, 2*n))
     
-    for i in range(n):
+    for i in tqdm(range(n), desc='Grid plot'):
         for j in range(m):
             axes[i, j].imshow(mat[i][j], vmin=vmin, vmax=vmax)
             axes[i, j].axis('off')
@@ -171,12 +172,21 @@ def get_peak_irfs(irfs):
         'string': states
     }
     
-def get_zero_irf(input_dims, model, cid, device='cpu'):
+def get_zero_irf(input_dims, model, cid, device='cpu', nobatch=False):
+    dims = input_dims if nobatch else (1, *input_dims)
     return irf(
         {
             "stim":
-                torch.zeros((1, *input_dims), device=device)
+                torch.zeros(dims, device=device)
         }, model, [cid]).detach().cpu().squeeze(0)
+    
+def get_zero_irfC(input_dims, model, cid, device='cpu'):
+    rf = irfC(
+        {
+            "stim":
+                torch.zeros(input_dims, device=device)
+        }, model, [cid], input_dims[0])[0]
+    return rf.detach().cpu()
 
 def generate_irfs(val_dl, model, cids, path=None, zero=False, device='cpu'):
     '''
@@ -567,7 +577,8 @@ def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
             Tsum = valid_data['dfs'][:,model.cids].sum(dim=0)
             Rsum = (valid_data['dfs'][:,model.cids]*valid_data['robs'][:,model.cids]).sum(dim=0)
     else:
-        for data in tqdm(valid_data, desc='Eval models'):            
+        for data in tqdm(valid_data, desc='Eval models'):  
+            data = to_device(data, next(model.parameters()).device)          
             with torch.no_grad():
                 rpred = model(data) * t_std + t_mean
                 LLsum += loss(rpred,
@@ -576,6 +587,7 @@ def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
                         temporal_normalize=False)
                 Tsum += data['dfs'][:,model.cids].sum(dim=0)
                 Rsum += (data['dfs'][:,model.cids] * data['robs'][:,model.cids]).sum(dim=0)
+            del data
                 
     LLneuron = LLsum/Rsum.clamp(1)
 

@@ -336,6 +336,101 @@ def get_separable_cnn(config_init):
             model.to(device)
         return model
     return get_separable_cnn_helper
+
+class CBlock3D(nn.Module):
+    def __init__(self, cin, cout, k=3, padding="same", nl=F.softplus):
+        super().__init__()
+        self.c = nn.Conv3d(cin, cout, kernel_size=k, padding=padding)
+        self.bn = nn.BatchNorm3d(cout)
+        self.nl = nl
+    def forward(self, x):
+        x = self.c(x)
+        x = self.bn(x)
+        x = self.nl(x)
+        return x
+class CBlock2D(nn.Module):
+    def __init__(self, cin, cout, k=3, padding="same", nl=F.softplus):
+        super().__init__()
+        self.c = nn.Conv2d(cin, cout, kernel_size=k, padding=padding)
+        self.bn = nn.BatchNorm2d(cout)
+        self.nl = nl
+    def forward(self, x):
+        x = self.c(x)
+        x = self.bn(x)
+        x = self.nl(x)
+        return x
+    
+class CoreC(nn.Module):
+    def __init__(self, input_dims, nl=F.softplus, num_lags=36):
+        super().__init__()
+        self.input_dims = input_dims
+        self.nl = nl
+        self.num_lags = num_lags
+        self.c1 = CBlock3D(input_dims[0], 20, k=(36, 11, 11), padding=0)
+        self.c2 = nn.Sequential(
+            CBlock2D(20, 20, k=11, padding="same"),
+            CBlock2D(20, 20, k=11, padding="same"),
+            CBlock2D(20, 20, k=11, padding="same"),
+        )
+        # input is (t, *input_dims)
+    def forward(self, x):
+        # x shape is (t, 1, h, w)
+        x = x.squeeze(1).permute(1, 0, 2, 3).unsqueeze(0)
+        # x shape is (1, 1, t, h, w)
+        x = F.pad(x, (5, 5, 5, 5, self.num_lags-1, 0))
+        x = self.c1(x)
+        # x shape is (1, 20, t, h, w)
+        x = x.squeeze(0).permute(1, 0, 2, 3)
+        return self.c2(x) # shape is (t, 20, h, w)
+
+class ReadoutC(nn.Module):
+    def __init__(self, input_dims, ncids, nlags=36):
+        super().__init__()
+        self.input_dims = input_dims # (c, x, y)
+        self.nlags = nlags
+        self.collapse_channels = nn.Conv3d(input_dims[0], ncids, kernel_size=1)
+        self.collaps_time = nn.Conv3d(ncids, ncids, kernel_size=(nlags, 1, 1), groups=ncids, bias=False)
+        self.collaps_time.weight.data = torch.ones_like(self.collaps_time.weight.data)/1000
+        # self.collapse_channels = nn.Parameter(torch.randn(ncids, input_dims[1]))
+        self.collapse_space = nn.Parameter(torch.ones(ncids, input_dims[1], input_dims[2])/1000)
+        # self.collapse_time = nn.Parameter(torch.randn(ncids, input_dims[0]))
+        # self.collaps = nn.Parameter(torch.randn(ncids, input_dims[0], input_dims[1], input_dims[2]))
+        self.gain = nn.Parameter(torch.ones(1, ncids))
+        self.bias = nn.Parameter(torch.zeros(1, ncids))
+    def forward(self, x):
+        # with torch.no_grad():
+        #     self.collaps_time.weight.data = F.relu(self.collaps_time.weight.data)
+        #     self.collapse_space.data = F.relu(self.collapse_space.data)
+        x = x.permute(1, 0, 2, 3).unsqueeze(0)
+        x = F.pad(x, (0, 0, 0, 0, 0, self.nlags-1))
+        x = self.collaps_time(self.collapse_channels(x)).squeeze(0) # (ncids, t, x, y)
+        x = torch.einsum("nbxy,nxy->bn", x, self.collapse_space)
+        # x = torch.einsum("bcn,nc->bn", x, self.collapse_channels)
+        # x = torch.einsum("bcxy,ncxy->bn", x, self.collapse)
+        return x * self.gain + self.bias
+    def compute_reg_loss(self, *args, **kwargs):
+        return 0#locality(self.collapse_space)/100000 + self.collapse_space.norm(1)/self.collapse_space.numel()
+    
+class CNNC(nn.Module):
+    def __init__(self, input_dims, ncids, nl=F.softplus, output_nl=F.softplus):
+        super().__init__()
+        # input_dims is (c, x, y, nlags)
+        self.core = CoreC(input_dims[:3], nl, input_dims[-1])
+        self.readout = ReadoutC([20, *input_dims[1:3]], ncids, input_dims[-1])
+        self.output_nl = output_nl
+    def forward(self, x):
+        x = self.core(x)
+        x = self.readout(x)
+        return self.output_nl(x)
+
+def get_cnnc(config_init):
+    def get_cnnc_helper(config, device='cpu'):
+        return PytorchWrapper(
+            CNNC(config_init['input_dims'], len(config['cids'])),
+            cids=config['cids']
+        )
+    return get_cnnc_helper
+        
 # def get_attention_cnn(config_init):
 #     def get_attention_cnn_helper(config, device='cpu'):
 #         cnn = get_cnn(config_init)(config, device)
@@ -438,6 +533,7 @@ MODEL_DICT = {
     # 'BioV': get_biov,
     'gaborC': get_gaborC,
     'seperableCNN': get_separable_cnn,
+    'cnnc': get_cnnc,
 }
 
 def verify_config(config):

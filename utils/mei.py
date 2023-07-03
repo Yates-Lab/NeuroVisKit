@@ -13,8 +13,9 @@ def irf(inp, model, cids, plot=False, shape=(35, 35, 24)):
         cids: list of neuron ids
         shape: shape of the input for plotting
     '''
+    if type(cids) == int:
+        cids = [cids]
     inp["stim"].requires_grad_()
-    model.zero_grad()
     # Get the current prediction
     pred = model(inp)
     #identify relevant neurons
@@ -27,6 +28,25 @@ def irf(inp, model, cids, plot=False, shape=(35, 35, 24)):
     if plot:
         plot_stim(grad.detach().cpu().reshape(shape))
     return grad
+
+def irfC(inp, model, cids, num_lags):
+    '''
+        Generate the instantaneous receptive field for a given input and neuron/s.
+
+        inp: input dictionary, assumed to be shape (t, c, x, y)
+        cids: list of neuron ids
+    '''
+    if type(cids) == int:
+        cids = [cids]
+    grad = []
+    for i in range(inp["stim"].shape[0]-num_lags+1):
+        stim = inp["stim"][i:i+num_lags].requires_grad_()
+        out = model({"stim": stim})[num_lags-1:, cids].mean(-1)
+        grad.append(torch.autograd.grad(out, stim)[0])
+        del stim, out
+    # batched = np.arange(len(out)).reshape(-1, 1)
+    # grad = torch.autograd.grad(out, stim, batched, is_grads_batched=True)
+    return torch.stack(grad)
 
 def integrated_irf(inp, model, cids, n_steps=2, plot=False, shape=(35, 35, 24)):
     '''
