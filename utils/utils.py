@@ -20,11 +20,12 @@ class TimeLogger():
         self.timer = time.time()
     def log(self, msg):
         print(f'{msg} {(time.time() - self.timer):.1f}s')
+        self.accumulated += time.time() - self.timer
         self.timer = time.time()
     def closure(self):
         self.reset()
         m, s = int(self.accumulated//60), self.accumulated%60
-        self.log(f'Total run took {m}m {s}s')
+        print(f'Total run took {m}m {s}s')
         self.accumulated = 0
         
 def to_device(x, device='cpu'):
