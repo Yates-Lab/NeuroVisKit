@@ -36,7 +36,7 @@ config_defaults = {
     'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss,
     'pretrained_core': None,
     'defrost': False,
-    'batch_size': 2,
+    'batch_size': 3,
     'seed': 420,
     'device': '1,',
     'session': '20200304C',
@@ -108,8 +108,13 @@ if config["trainer"] == "lbfgs":
     train_dl = iter([ds[session["train_inds"]]])
     val_dl = iter([ds[session["val_inds"]]])
 else:
-    train_dl = get_fix_dataloader(ds, session["train_inds"], batch_size=config['batch_size'])
-    val_dl = get_fix_dataloader(ds, session["val_inds"], batch_size=config['batch_size'])
+    if config["device"] != "cpu":
+        device = "cuda:"+config["device"].split(',')[0]
+        train_dl = get_fix_dataloader(ds, session["train_inds"], batch_size=config['batch_size'], device=device)
+        val_dl = get_fix_dataloader(ds, session["val_inds"], batch_size=config['batch_size'], device=device)
+    else:
+        train_dl = get_fix_dataloader(ds, session["train_inds"], batch_size=config['batch_size'])
+        val_dl = get_fix_dataloader(ds, session["val_inds"], batch_size=config['batch_size'])
 
 #%%
 # Load model and preprocess data.

@@ -149,7 +149,7 @@ class PLWrapper(pl.LightningModule):
     def training_step(self, x, batch_idx=0, dataloader_idx=0):
         x = self.preprocess_data(x)
         losses = self.wrapped_model.training_step(x)
-        self.log("train_loss", losses['train_loss'], prog_bar=True, on_epoch=True, batch_size=len(x["stim"]))
+        self.log("train_loss", losses['train_loss'], prog_bar=True, on_epoch=True, batch_size=len(x["stim"]), on_step=True)
         if "reg_loss" in losses.keys():
             self.log("reg_loss", losses['reg_loss'], prog_bar=True, on_step=True, batch_size=len(x["stim"]))
         del x
@@ -219,13 +219,13 @@ def sum_dict_list(dlist):
             dsum[k].append(v)
     return {k: torch.cat(v, dim=0) for k,v in dsum.items()}
 
-def get_fix_dataloader(ds, inds, batch_size=1, num_workers=os.cpu_count()//2):
+def get_fix_dataloader(ds, inds, batch_size=1, num_workers=os.cpu_count()//2, device=None):
     sampler = BatchSampler(
         SubsetRandomSampler(inds),
         batch_size=batch_size,
         drop_last=True
     )
-    dl = DataLoader(ds, sampler=sampler, batch_size=None, num_workers=num_workers)
+    dl = DataLoader(ds, sampler=sampler, batch_size=None, num_workers=num_workers, pin_memory=device is not None, pin_memory_device=device)
     return dl
 
 class ArrayDataset(Dataset):
@@ -252,6 +252,11 @@ class IterableDataloader():
     def __iter__(self):
         return iter(self.iterable)
 
+# class PreloadedTrainingFixDataloader():
+#     def __init__(self, ds, inds, batch_size=1, device='cpu'):
+#         self.dl = get_fix_dataloader(ds, inds, batch_size=batch_size, num_workers=os.cpu_count()//2)
+#         self.device = device
+        
 def get_fix_dataloader_preload(ds, inds, batch_size=1, num_workers=os.cpu_count()//2, device='cpu'):
     dl = get_fix_dataloader(ds, inds, batch_size=batch_size, num_workers=num_workers)
     for x in dl:

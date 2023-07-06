@@ -142,11 +142,7 @@ def train(model,
                     torch.save(model, os.path.join(checkpoint_path, 'model.pkl'))
                 verbose_print("Finished checkpointing", v=2)
             elif patience is not None:
-                e = 1e-10 #make it greater than zero in case you want to stop if doesn't converge.
-                if this_val-val_loss_min/abs(val_loss_min) < e:
-                    patience -= 0.1
-                else:
-                    patience -= 1
+                patience -= 1
                 verbose_print(
                     f"Losing patience ಠ_ಠ (best val: {val_loss_min:.4f}, current val: {this_val:.4f}, patience: {patience})", v=2)
                 if patience <= 0:

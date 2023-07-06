@@ -52,12 +52,14 @@ def plot_stim(stim, fig=None, title=None, subplot_shape=(1, 1)):
     plt.tight_layout()
     return fig
 
-def seed_everything(seed):
+def seed_everything(seed, noprint=False):
     np.random.seed(seed)
     random.seed(seed)
     torch.manual_seed(seed)
     os.environ['PYTHONHASHSEED']=str(seed)
     torch.cuda.manual_seed(str(seed))
+    if not noprint:
+        print(f'Seeding with {seed}')
 
 def memory_clear():
     '''
@@ -114,7 +116,7 @@ def get_dataloader(dataset, batch_size=1000, shuffle=True):
         return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=os.cpu_count()//2)
 
-def unpickle_data(nsamples_train=None, nsamples_val=None, device="cpu", path=None):
+def unpickle_data(nsamples_train_limit=None, nsamples_val_limit=None, device="cpu", path=None):
     '''
         Get training and validation data from pickled files and place on device.
     '''
@@ -127,17 +129,17 @@ def unpickle_data(nsamples_train=None, nsamples_val=None, device="cpu", path=Non
         loaded = torch.load(os.path.join(train_path, file), map_location=device)
         num_samples[0] = loaded.shape[0]
         train_data_local[file[:-3]
-                         ] = loaded[:nsamples_train].clone()
+                         ] = loaded[:nsamples_train_limit].clone()
         del loaded
         memory_clear()
     for file in os.listdir(val_path):
         loaded = torch.load(os.path.join(val_path, file), map_location=device)
         num_samples[1] = loaded.shape[0]
         val_data_local[file[:-3]
-                       ] = loaded[:nsamples_val].clone()
+                       ] = loaded[:nsamples_val_limit].clone()
         del loaded
         memory_clear()
-    print(f'Loaded {nsamples_train} training samples and {nsamples_val} validation samples')
+    print(f'Loaded {nsamples_train_limit} training samples and {nsamples_val_limit} validation samples')
     print(f'Out of {num_samples[0]} training samples and {num_samples[1]} validation samples')
     return train_data_local, val_data_local
 

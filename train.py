@@ -16,8 +16,8 @@ seed_everything(0)
 
 run_name = 'test' # Name of log dir.
 session_name = '20200304'
-nsamples_train=None
-nsamples_val=None
+nsamples_train_limit=None
+nsamples_val_limit=None
 overwrite = False
 from_checkpoint = False
 device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
@@ -48,9 +48,9 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
         elif opt in ("-c", "--config"):
             config = config.update(json.loads(arg))
         elif opt == "--train":
-            nsamples_train = int(arg)
+            nsamples_train_limit = int(arg)
         elif opt == "--val":
-            nsamples_val = int(arg)
+            nsamples_val_limit = int(arg)
         elif opt in ("-o", "--overwrite"):
             overwrite = True
         elif opt in ("--from_checkpoint"):
@@ -106,14 +106,18 @@ config.update({
 
 # %%
 # Load data.
-train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val, path=data_dir)
+train_data, val_data = unpickle_data(nsamples_train_limit=nsamples_train_limit, nsamples_val_limit=nsamples_val_limit, path=data_dir)
 train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, device=device, batch_size=config['batch_size'])
 
 #%%
 # Load model and preprocess data.
 if from_checkpoint:
-    with open(os.path.join(checkpoint_dir, 'model.pkl'), 'rb') as f:
-        model = dill.load(f).to(device)
+    try:
+        model = torch.load(os.path.join(checkpoint_dir, 'model.pkl')).cpu()
+    except:
+        with open(os.path.join(checkpoint_dir, 'model.pkl'), 'rb') as f:
+            model = dill.load(f).cpu()
+    model.to(device)
 else:
     model = get_model(config)
     if config['pretrained_core'] is not None:
@@ -156,8 +160,8 @@ with open(os.path.join(checkpoint_dir, 'metadata.txt'), 'w') as f:
     to_write = {
         'run_name': run_name,
         'session_name': session_name,
-        'nsamples_train': nsamples_train,
-        'nsamples_val': nsamples_val,
+        'nsamples_train_limit': nsamples_train_limit,
+        'nsamples_val_limit': nsamples_val_limit,
         'seed': seed,
         'config': config_original,
         'device': str(device),

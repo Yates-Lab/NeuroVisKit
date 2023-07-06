@@ -20,8 +20,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 seed_everything(0)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
-nsamples_train=1
-nsamples_val=None #56643 | None is equivalent to all
+nsamples_train_limit=1
+nsamples_val_limit=None #56643 | None is equivalent to all
 batch_size=1000 # Reduce if you run out of memory
 run_name = 'test_smooth'
 session_name = '20200304'
@@ -47,7 +47,9 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
             fast = True
         elif opt in ("--sigmoid"):
             sigmoid = True
-
+else:
+    print('Interactive mode.')
+    run_name = "test_no_init"
 #%%
 # Determine paths.
 cwd = os.getcwd()
@@ -61,22 +63,24 @@ logger = TimeLogger()
 with open(os.path.join(data_path, 'session.pkl'), 'rb') as f:
     session = dill.load(f)
 cids = session['cids']
-with open(os.path.join(model_path, 'model.pkl'), 'rb') as f:
-    model = dill.load(f)
+try:
+    model = torch.load(os.path.join(model_path, 'model.pkl')).cpu()
+except:
+    with open(os.path.join(model_path, 'model.pkl'), 'rb') as f:
+        model = dill.load(f).cpu()
 if os.path.exists(os.path.join(model_path, 'config.pkl')):
     with open(os.path.join(model_path, 'config.pkl'), 'rb') as f:
         config = dill.load(f)
 else:
     config = {}
-model = model.to(device)
-model.model = model.model.to(device)
+model.to(device)
 if not isPytorch:
     core = model.model.core
 input_dims = session['input_dims'][1:]
 logger.log('Loaded model.')
 
 #%%
-train_data, val_data = unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val, device=device, path=data_path)
+train_data, val_data = unpickle_data(nsamples_train_limit=nsamples_train_limit, nsamples_val_limit=nsamples_val_limit, device=device, path=data_path)
 train_dl, val_dl, train_ds, val_ds = get_datasets(train_data, val_data, batch_size=batch_size, device=device)
 loader = utils.Loader(val_ds, shuffled=True, cyclic=True)
 logger.log('Loaded data.')

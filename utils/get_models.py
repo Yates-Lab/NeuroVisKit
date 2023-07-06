@@ -337,28 +337,117 @@ def get_separable_cnn(config_init):
         return model
     return get_separable_cnn_helper
 
+def shrink_conv_weights(x,d=2):
+    """
+        x is a tensor with shape (cout, cin, k1, ..., kd)
+        d is the number of dimensions of conv (either 2 or 3)
+    """
+    for cout in range(x.shape[0]):
+        for cin in range(x.shape[1]):
+            cuttoff = x[cout, cin].max()*0.5
+            inds = torch.where(x[cout, cin] < cuttoff)
+            if d == 2:
+                sign = torch.sign(x[cout, cin, inds[0], inds[1]])
+                mag = F.relu(torch.abs(x[cout, cin, inds[0], inds[1]])-cuttoff/100)
+                x[cout, cin, inds[0], inds[1]] = sign * mag
+            elif d == 3:
+                sign = torch.sign(x[cout, cin, inds[0], inds[1], inds[2]])
+                mag = F.relu(torch.abs(x[cout, cin, inds[0], inds[1], inds[2]])-cuttoff/100)
+                x[cout, cin, inds[0], inds[1], inds[2]] = sign * mag
+    return x
+    
 class CBlock3D(nn.Module):
-    def __init__(self, cin, cout, k=3, padding="same", nl=F.softplus):
+    def __init__(self, cin, cout, k=3, padding="same", nl=F.softplus, window=True):
         super().__init__()
         self.c = nn.Conv3d(cin, cout, kernel_size=k, padding=padding)
+        self.is_window = window
+        if window:
+            self.window_on = False
+            self.original_weights = None
         self.bn = nn.BatchNorm3d(cout)
         self.nl = nl
     def forward(self, x):
+        with torch.no_grad():
+            self.c.weight.data = shrink_conv_weights(self.c.weight.data, d=3)
+        self.window()
         x = self.c(x)
         x = self.bn(x)
         x = self.nl(x)
+        self.unwindow()
         return x
+    def eval(self):
+        return self.train(False)
+    def train(self, mode=True):
+        if mode:
+            if self.is_window and self.window_on:
+                self.unwindow()
+        else:
+            if self.is_window and not self.window_on:
+                self.window()
+        return super().train(mode)
+    def window(self):
+        if not self.is_window:
+            return
+        with torch.no_grad():
+            device = self.c.weight.data.device
+            w1, w2, w3 = [torch.hamming_window(self.c.weight.shape[i], periodic=False, device=device) for i in [-3, -2, -1]]
+            self.original_weights = self.c.weight.data.clone()
+            self.c.weight.data = torch.einsum("i,j,k,noijk->noijk", w1, w2, w3, self.c.weight.data)
+            self.window_on = True
+    def unwindow(self):
+        if not self.is_window:
+            return
+        with torch.no_grad():
+            self.c.weight.data = self.original_weights.to(self.c.weight.data.device)
+            self.original_weights = None
+            self.window_on = False
+            
 class CBlock2D(nn.Module):
-    def __init__(self, cin, cout, k=3, padding="same", nl=F.softplus):
+    def __init__(self, cin, cout, k=3, padding="same", nl=F.softplus, window=True):
         super().__init__()
         self.c = nn.Conv2d(cin, cout, kernel_size=k, padding=padding)
+        self.is_window = window
+        if window:
+            self.window_on = False
+            self.original_weights = None
         self.bn = nn.BatchNorm2d(cout)
         self.nl = nl
     def forward(self, x):
+        with torch.no_grad():
+            self.c.weight.data = shrink_conv_weights(self.c.weight.data, d=2)
+        self.window()
         x = self.c(x)
         x = self.bn(x)
         x = self.nl(x)
+        self.unwindow()
         return x
+    def eval(self):
+        return self.train(False)
+    def train(self, mode=True):
+        if mode:
+            if self.is_window and self.window_on:
+                self.unwindow()
+        else:
+            if self.is_window and not self.window_on:
+                self.window()
+        return super().train(mode)
+    def window(self):
+        if not self.is_window or self.window_on:
+            return
+        with torch.no_grad():
+            device = self.c.weight.data.device
+            w1, w2 = [torch.hamming_window(self.c.weight.shape[i], periodic=False, device=device) for i in [-2, -1]]
+            self.original_weights = self.c.weight.data.clone()
+            self.c.weight.data = torch.einsum("i,j,noij->noij", w1, w2, self.c.weight.data)
+            self.window_on = True
+    def unwindow(self):
+        if not self.is_window or not self.window_on:
+            return
+        with torch.no_grad():
+            self.c.weight.data = self.original_weights.to(self.c.weight.data.device)
+            self.original_weights = None
+            self.window_on = False
+        
     
 class CoreC(nn.Module):
     def __init__(self, input_dims, nl=F.softplus, num_lags=36):
@@ -409,7 +498,7 @@ class ReadoutC(nn.Module):
         # x = torch.einsum("bcxy,ncxy->bn", x, self.collapse)
         return x * self.gain + self.bias
     def compute_reg_loss(self, *args, **kwargs):
-        return 0#locality(self.collapse_space)/100000 + self.collapse_space.norm(1)/self.collapse_space.numel()
+        return 0#self.collapse_space.norm(1)/self.collapse_space.numel()/1000 #locality(self.collapse_space)/100000
     
 class CNNC(nn.Module):
     def __init__(self, input_dims, ncids, nl=F.softplus, output_nl=F.softplus):
@@ -422,6 +511,12 @@ class CNNC(nn.Module):
         x = self.core(x)
         x = self.readout(x)
         return self.output_nl(x)
+    def compute_reg_loss(self, *args, **kwargs):
+        reg = 0
+        for i in [self.core, self.readout]:
+            if hasattr(i, 'compute_reg_loss'):
+                reg += i.compute_reg_loss(*args, **kwargs)
+        return reg
 
 def get_cnnc(config_init):
     def get_cnnc_helper(config, device='cpu'):
@@ -512,13 +607,17 @@ def get_cnn(config_init):
                 device=device)
 
         # initialize parameters
-        w_centered = initialize_gaussian_envelope( cr0.core[0].get_weights(to_reshape=False), cr0.core[0].filter_dims)
-        cr0.core[0].weight.data = torch.tensor(w_centered, dtype=torch.float32)
-        if mu is not None and hasattr(cr0.readout, 'mu'):
-            cr0.readout.mu.data = torch.from_numpy(mu[cids].copy().astype('float32')).to(device)
-            cr0.readout.mu.requires_grad = True
-            cr0.readout.sigma.data.fill_(0.5)
-            cr0.readout.sigma.requires_grad = True
+        # for i in range(1):
+        #     w_centered = initialize_gaussian_envelope( cr0.core[i].get_weights(to_reshape=False), cr0.core[i].filter_dims)
+        #     cr0.core[i].weight.data = torch.tensor(w_centered, dtype=torch.float32)
+        # if mu is not None and hasattr(cr0.readout, 'mu'):
+        #     print('setting mu')
+        #     cr0.readout.mu.data = torch.from_numpy(mu[cids].copy().astype('float32')).to(device)
+        #     cr0.readout.mu.requires_grad = True
+        #     cr0.readout.sigma.data.fill_(0.5)
+        #     cr0.readout.sigma.requires_grad = True
+        # else:
+        #     print('not setting mu', mu is not None, hasattr(cr0.readout, 'mu'))
         model = ModelWrapper(cr0)
         if 'lightning' not in config_init or not config_init['lightning']:
             model.to(device)

@@ -22,7 +22,7 @@ def zscore_robs(x):
     return (x - x.mean(0, keepdim=True)) / x.std(0, keepdim=True)
 
 def train_f(opt, **kwargs):
-    def train_f(model, train_loader, val_loader, checkpoint_dir, device, patience=30, memory_saver=False):
+    def train_f(model, train_loader, val_loader, checkpoint_dir, device, patience=40, memory_saver=False):
         max_epochs = 100
         optimizer = opt(model.parameters(), **kwargs)
         val_loss_min = train(

@@ -67,6 +67,7 @@ with open(dirs["config_path"], 'r') as f:
     
 cids = session['cids']
 model = model.to(device)
+model.eval()
 model.model = model.model.to(device)
 core = model.model.core if hasattr(model.model, 'core') else None
 readout = model.model.readout if hasattr(model.model, 'readout') else None
@@ -121,7 +122,7 @@ if not config["fast"]:
     irf_dl = lutils.get_fix_dataloader(ds, val_inds[offset:offset+nfixations], batch_size=1)
     val_data_slice = ds[val_inds[offset:offset+nfixations]]
     stims, robs, dfs = val_data_slice["stim"], val_data_slice["robs"], val_data_slice["dfs"]
-    fixation_ind = [ind for ind in val_inds[offset:offset+nfixations] for _ in range(len(ds[ind]))]
+    fixation_ind = [ind for ind in val_inds[offset:offset+nfixations] for _ in range(len(ds[ind]["robs"]))]
     is_saccade = [False] + (np.diff(fixation_ind) != 0).tolist()
     movie_cid_list = list(best_cids[:ncids])
     cc_originals = [cids[cc] for cc in movie_cid_list]
