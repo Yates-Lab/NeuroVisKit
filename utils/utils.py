@@ -10,6 +10,10 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from datasets.generic import GenericDataset
 from tqdm import tqdm
+from functools import reduce
+
+def getattr_deep(obj, attr):
+    return reduce(getattr, attr.split('.'), obj)
 
 class TimeLogger():
     def __init__(self):

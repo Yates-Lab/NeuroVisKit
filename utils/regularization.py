@@ -3,8 +3,6 @@ from typing import Any
 import torch
 from torch import nn
 from torch.nn import functional as F
-
-from copy import deepcopy
 import numpy as np
 
 def verify_dims(shape, dims):
@@ -22,7 +20,7 @@ class RegularizationModule(nn.Module):
         self.shape = shape
     def forward(self, x):
         return self.function(x)
-
+    
 class l1(RegularizationModule):
     def function(self, x):
         return torch.sum(torch.abs(x)) / x.numel()
