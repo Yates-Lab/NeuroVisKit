@@ -14,39 +14,53 @@ def verify_dims(shape, dims):
     return out
             
 class RegularizationModule(nn.Module):
-    def __init__(self, shape=None, dims=None, **kwargs):
+    def __init__(self, coefficient=1, shape=None, dims=None, **kwargs):
         super().__init__()
         self.dims = dims
         self.shape = shape
+        self.coefficient = coefficient
     def forward(self, x):
-        return self.function(x)
+        return self.function(x) * self.coefficient
+
+class Compose(nn.Module):
+    def __init__(self, *args):
+        super().__init__()
+        self.args = nn.ModuleList(args)
+    def forward(self, x):
+        return sum([arg(x) for arg in self.args])
     
 class l1(RegularizationModule):
+    def __init__(self, coefficient=1, **kwargs):
+        super().__init__(coefficient=coefficient, **kwargs)
     def function(self, x):
         return torch.sum(torch.abs(x)) / x.numel()
 
 class l2(RegularizationModule):
+    def __init__(self, coefficient=1, **kwargs):
+        super().__init__(coefficient=coefficient, **kwargs)
     def function(self, x):
         return torch.sum(x**2) / x.numel()
 
 class local(RegularizationModule):
-    def __init__(self, shape=None, dims=None, is_global=False, **kwargs):
-        super().__init__(shape=shape, dims=dims, **kwargs)
+    def __init__(self, coefficient=1, shape=None, dims=None, is_global=False, **kwargs):
+        super().__init__(coefficient=coefficient, shape=shape, dims=dims, **kwargs)
         assert shape is not None, 'Must specify expected shape of item to be penalized'
         self.dims = verify_dims(shape, dims)
         for ind in self.dims:
             i = shape[ind]
             v = ((torch.arange(i)-torch.arange(i)[:,None])**2).float()/i**2 # shape = (i,j)
-            self.register_buffer('local_pen'+ind, v)
+            self.register_buffer(f'local_pen{ind}', v)
         self.is_global = is_global
     def function(self, x):
         w = x**2
         w = w.permute(*self.dims, *[i for i in range(len(self.shape)) if i not in self.dims])
-        w = w.reshape(*self.dims, -1)
+        w = w.reshape(*[self.shape[i] for i in self.dims], -1)
         pen = 0
         for ind, dim in enumerate(self.dims):
-            mat = getattr(self, 'local_pen'+dim) # shape = (i,j)
-            w_permuted = w.permute(list(range(len(w.shape)))-[ind]+[ind])
+            mat = getattr(self, f'local_pen{dim}') # shape = (i,j)
+            w_permuted_shape = list(range(len(w.shape)))
+            w_permuted_shape.remove(ind)
+            w_permuted = w.permute(w_permuted_shape+[ind])
             if self.is_global:
                 w_permuted = w_permuted.sum(list(range(len(w_permuted.shape)-2))).unsqueeze(0)
             temp = torch.einsum('...ni,ij->nj', w_permuted, mat)
@@ -55,26 +69,28 @@ class local(RegularizationModule):
         return torch.mean(pen)
 
 class glocal(local):
-    def __init__(self, shape=None, dims=None, **kwargs):
-        super().__init__(shape=shape, dims=dims, is_global=True, **kwargs)
+    def __init__(self, coefficient=1, shape=None, dims=None, **kwargs):
+        super().__init__(coefficient=coefficient, shape=shape, dims=dims, is_global=True, **kwargs)
         
 class edge(RegularizationModule):
-    def __init__(self, dims=None, **kwargs):
-        super().__init__(dims=dims, **kwargs)
+    def __init__(self, coefficient=1, dims=None, **kwargs):
+        super().__init__(coefficient=coefficient, dims=dims, **kwargs)
     def function(self, x):
         self.dims = verify_dims(x.shape, self.dims)
         w = x**2
         w = w.permute(*self.dims, *[i for i in range(len(self.shape)) if i not in self.dims])
-        w = w.reshape(*self.dims, -1)
+        w = w.reshape(*[self.shape[i] for i in self.dims], -1)
         pen = 0
         for ind in range(len(self.dims)):
-            w_permuted = w.permute(list(range(len(w.shape)))-[ind]+[ind])
+            w_permuted_shape = list(range(len(w.shape)))
+            w_permuted_shape.remove(ind)
+            w_permuted = w.permute(w_permuted_shape+[ind])
             pen = pen + (w_permuted[...,0].mean() + w_permuted[...,-1].mean())/2
         return pen/len(self.dims)
 
 class center(RegularizationModule):
-    def __init__(self, shape=None, dims=None, **kwargs):
-        super().__init__(shape=shape, dims=dims, **kwargs)
+    def __init__(self, coefficient=1, shape=None, dims=None, **kwargs):
+        super().__init__(coefficient=coefficient, shape=shape, dims=dims, **kwargs)
         assert shape is not None, 'Must specify expected shape of item to be penalized'
         self.dims = verify_dims(shape, self.dims)
         ranges = [torch.linspace(-1, 1, shape[i]) for i in self.dims]
@@ -92,8 +108,8 @@ class center(RegularizationModule):
         return torch.mean(w*self.center_pen)
     
 class Convolutional(RegularizationModule):
-    def __init__(self, kernel=None, dims=None, **kwargs):
-        super().__init__(dims=dims, **kwargs)
+    def __init__(self, coefficient=1, kernel=None, dims=None, **kwargs):
+        super().__init__(coefficient=coefficient, dims=dims, **kwargs)
         assert kernel is not None, 'Must specify kernel for laplacian'
         assert len(kernel) == len(dims), 'Kernel must have same number of dimensions as dims'
         self.kernel = kernel.unsqueeze(0).unsqueeze(0)
@@ -105,11 +121,16 @@ class Convolutional(RegularizationModule):
         return (self.conv(x, self.kernel)**2).mean()
 
 class laplacian(Convolutional):
-    def __init__(self, dims=None, **kwargs):
+    #https://en.wikipedia.org/wiki/Discrete_Laplace_operator
+    def __init__(self, coefficient=1, dims=None, **kwargs):
         if len(dims) == 1:
             kernel = torch.tensor([[[1,-2,1]]])
         elif len(dims) == 2:
-            kernel = torch.tensor([[[0,1,0],[1,-4,1],[0,1,0]]])
+            kernel = torch.tensor([[[0.25,0.5,0.25],[0.5,-3,0.5],[0.25,0.5,0.25]]])
+        elif len(dims) == 3:
+            kernel = torch.tensor([[[0, 0, 0], [0, 1, 0], [0, 0, 0]],
+                                   [[0, 1, 0], [1, -6, 1], [0, 1, 0]],
+                                   [[0, 0, 0], [0, 1, 0], [0, 0, 0]]])
         else:
             raise NotImplementedError('Laplacian not implemented for {} dimensions'.format(len(dims)))
-        super().__init__(kernel=kernel, dims=dims, **kwargs)
+        super().__init__(coefficient=coefficient, kernel=kernel, dims=dims, **kwargs)
