@@ -89,16 +89,16 @@ else:
     config["name"] = "testB"
     config["overwrite"] = True
     config["session"] = "20200304B"
-    # config["model"] = "cnnc"
+    config["model"] = "cnnc"
 #%%
 # Prepare helpers for training.
 config["dirname"] = os.path.join(os.getcwd(), 'data') # this is the directory where the data is stored
 dirs, config, session = utils.prepare_dirs(config)
 # %%
 # Load data.
-ds = FixationMultiDataset.load(dirs["ds_dir"])
-ds.use_blocks = True
-ds = InMemoryContiguousDataset3(ds)
+ds_disk = FixationMultiDataset.load(dirs["ds_dir"])
+ds_disk.use_blocks = True
+ds = InMemoryContiguousDataset3(ds_disk)
 if config['load_preprocessed']:
     print("Loading preprocessed data")
     with open(os.path.join(dirs["session_dir"], 'preprocessed.pkl'), 'rb') as f:

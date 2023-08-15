@@ -339,7 +339,7 @@ def show_stim_movie(stim, path="stim_video.mp4", fps=30, normalizing_constant=No
     """
     stim = stim[:, 0].detach().cpu().numpy()
     if normalizing_constant is None:
-        stim = stim/stim.max()*127 + 127
+        stim = stim/np.abs(stim).max()*127 + 127
     else:
         stim = stim * normalizing_constant + 127
     stim = stim.astype(np.uint8)

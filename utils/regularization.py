@@ -16,6 +16,9 @@ def get_regs_dict():
 def _verify_dims(shape, dims):
     if dims is None:
         return list(range(len(shape)))
+    if shape is None:
+        print('Warning: shape is None, cannot verify dims')
+        return dims
     out = [i%len(shape) for i in dims]
     assert len(set(out)) == len(out), 'Duplicate dimensions specified'
     out.sort()

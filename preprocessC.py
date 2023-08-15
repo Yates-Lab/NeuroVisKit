@@ -66,7 +66,9 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
             device = torch.device(arg)
         elif opt in ("--sorting"):
             spike_sorting = arg
-
+else:
+    session_name = '20200304B'
+    
 WINDOW_SIZE = None#35
 TRAIN_FRAC = 0.85
 APPLY_SHIFTER = True
@@ -109,7 +111,7 @@ ds = FixationMultiDataset(sess_list=session_name.split('_'),
     saccade_basis = None,
     download=True,
     flatten=False,
-    crop_inds=[5, 75, 5, 75],
+    crop_inds=None,#[5, 75, 5, 75],
     min_fix_length=50,
     max_fix_length=1000,
     valid_eye_rad=VALID_EYE_RAD,
@@ -131,7 +133,9 @@ stim_id = 0
 lag = 5
 sta = C.check_raw_sta(ds, lag=lag, stim_id=stim_id)
 ds.use_blocks = True
+#%%
 stas = ds.get_stas()
+
 mu, bestlag, _ = plot_stas(stas.detach().cpu().numpy())
 #%% check batches
 nspikes, sus_fix = C.check_spikes_per_batch(ds)
