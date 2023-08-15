@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 from datasets.generic import GenericDataset
 from tqdm import tqdm
 from functools import reduce
+from IPython.display import Video
+import imageio
+import cv2
 
 def getattr_deep(obj, attr):
     return reduce(getattr, attr.split('.'), obj)
@@ -34,7 +37,7 @@ class TimeLogger():
         
 def to_device(x, device='cpu'):
     if torch.is_tensor(x):
-        return x.to(device)
+        return x.to(device) if x.device != device else x
     elif isinstance(x, dict):
         return {k: to_device(v, device=device) for k,v in x.items()}
     elif isinstance(x, list):
@@ -327,3 +330,22 @@ def reclass(obj, new_class_object=None):
     for k, v in vars(obj).items():
         setattr(new_class_object, k, v)        
     return new_class_object
+
+def show_stim_movie(stim, path="stim_video.mp4", fps=30, normalizing_constant=None):
+    """
+        Given stim show an interactive movie.
+        
+        stim: (time, 1, x, y)
+    """
+    stim = stim[:, 0].detach().cpu().numpy()
+    if normalizing_constant is None:
+        stim = stim/stim.max()*127 + 127
+    else:
+        stim = stim * normalizing_constant + 127
+    stim = stim.astype(np.uint8)
+    writer = imageio.get_writer('test.mp4', fps=20)
+    for i in stim:
+        writer.append_data(i)
+    writer.close()
+    w, h = stim.shape[1:]
+    return Video("test.mp4", embed=True, width=w*3, height=h*3)
