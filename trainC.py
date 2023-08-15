@@ -2,6 +2,8 @@
     Script for generating a nice fitting pipeline.
 '''
 #%%
+#!%load_ext autoreload
+#!%autoreload 2
 import os, sys, getopt, __main__, shutil, traceback
 import numpy as np
 import json, yaml
@@ -9,6 +11,7 @@ import torch
 import dill
 from utils.utils import seed_everything, unpickle_data, get_datasets, get_opt_dict, to_device
 from utils.loss import get_loss
+from utils.train import InMemoryContiguousDataset, InMemoryContiguousDataset2, InMemoryContiguousDataset3
 from datasets.mitchell.pixel import FixationMultiDataset
 from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler
 import torch.nn.functional as F
@@ -20,6 +23,7 @@ from utils.lightning import PLWrapper, get_fix_dataloader
 import utils.lightning as utils
 import logging
 from tqdm import tqdm
+#%%
 logging.getLogger("pytorch_lightning.utilities.rank_zero").addHandler(logging.NullHandler())
 torch.set_float32_matmul_precision("medium")
 seed_everything(0)
@@ -81,9 +85,11 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
         config = config_defaults
 else:
     config = config_defaults
-    config["load_preprocessed"] = True
-    config["name"] = "dynamic"
+    # config["load_preprocessed"] = True
+    config["name"] = "testB"
     config["overwrite"] = True
+    config["session"] = "20200304B"
+    # config["model"] = "cnnc"
 #%%
 # Prepare helpers for training.
 config["dirname"] = os.path.join(os.getcwd(), 'data') # this is the directory where the data is stored
@@ -92,7 +98,9 @@ dirs, config, session = utils.prepare_dirs(config)
 # Load data.
 ds = FixationMultiDataset.load(dirs["ds_dir"])
 ds.use_blocks = True
+ds = InMemoryContiguousDataset3(ds)
 if config['load_preprocessed']:
+    print("Loading preprocessed data")
     with open(os.path.join(dirs["session_dir"], 'preprocessed.pkl'), 'rb') as f:
         ds = dill.load(f)
 elif config['preprocess']:
@@ -109,7 +117,12 @@ if config["trainer"] == "lbfgs":
     val_dl = iter([ds[session["val_inds"]]])
 else:
     if config["device"] != "cpu":
-        device = "cuda:"+config["device"].split(',')[0]
+        if hasattr(ds, 'preload'):
+            print("Preloading")
+            device = "cuda:"+config["device"].split(',')[0]
+            ds.preload(device)
+        else:
+            device = None
         train_dl = get_fix_dataloader(ds, session["train_inds"], batch_size=config['batch_size'], device=device)
         val_dl = get_fix_dataloader(ds, session["val_inds"], batch_size=config['batch_size'], device=device)
     else:
