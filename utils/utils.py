@@ -343,7 +343,7 @@ def show_stim_movie(stim, path="stim_video.mp4", fps=30, normalizing_constant=No
     else:
         stim = stim * normalizing_constant + 127
     stim = stim.astype(np.uint8)
-    writer = imageio.get_writer('test.mp4', fps=20)
+    writer = imageio.get_writer('test.mp4', fps=fps)
     for i in stim:
         writer.append_data(i)
     writer.close()
