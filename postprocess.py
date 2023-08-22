@@ -10,7 +10,8 @@ import NDNT
 import numpy as np
 import dill
 import os, sys, getopt, __main__
-from utils.utils import unpickle_data, get_datasets, plot_transients, seed_everything, TimeLogger
+from utils.utils import unpickle_data, get_datasets, plot_transients, TimeLogger
+from _utils.utils import seed_everything
 from models.utils import plot_stas
 import utils.postprocess as utils
 from models.utils.plotting import plot_sta_movie

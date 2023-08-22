@@ -4,16 +4,15 @@
 #%%
 #!%load_ext autoreload
 #!%autoreload 2
-import os, sys, getopt, __main__, shutil, traceback
+import os, traceback
 import numpy as np
-import json, yaml
+import json
 import torch
 import dill
-from utils.utils import seed_everything, unpickle_data, get_datasets, get_opt_dict, to_device
+from _utils.utils import seed_everything, joinCWD
 from utils.loss import get_loss
-from utils.train import InMemoryContiguousDataset, InMemoryContiguousDataset2, InMemoryContiguousDataset3
+from utils.train import InMemoryContiguousDataset3
 from datasets.mitchell.pixel import FixationMultiDataset
-from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler
 import torch.nn.functional as F
 import torch.nn as nn
 import lightning as pl
@@ -22,10 +21,12 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from utils.lightning import PLWrapper, get_fix_dataloader
 import utils.lightning as utils
 import logging
+from _utils.utils import isInteractive, get_opt_dict
+from _utils.train import backupPreviousModel
 from tqdm import tqdm
-#%%
 logging.getLogger("pytorch_lightning.utilities.rank_zero").addHandler(logging.NullHandler())
 torch.set_float32_matmul_precision("medium")
+#%%
 seed_everything(0)
 
 config_defaults = {
@@ -53,8 +54,8 @@ config_defaults = {
 }
 
 # Here we make sure that the script can be run from the command line.
-if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
-    loaded_opts = get_opt_dict([
+if not isInteractive():
+    loaded_config = get_opt_dict([
         ('n:', 'name='),
         ('s:', 'seed=', int),
         # ('c:', 'config=', json.loads),
@@ -74,13 +75,11 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
         (None, 'load_preprocessed'),
         ('f', 'fast'),
         ('c', 'compile'),
-    ])
-    config_defaults.update(loaded_opts)
+    ], default=config_defaults)
     if config_defaults['from_checkpoint']:
-        with open(os.path.join(os.getcwd(), 'data', 'models', config_defaults["name"], 'config.json'), 'r') as f:
+        with open(joinCWD('data', 'models', config_defaults["name"], 'config.json'), 'r') as f:
             config = json.load(f)
-            # keys_to_remove = ['device', 'overwrite', 'session', 'loss', 'trainer', 'pretr']
-            config.update(loaded_opts)
+            config.update(loaded_config)
     else:
         config = config_defaults
 else:
@@ -92,7 +91,7 @@ else:
     config["model"] = "cnnc"
 #%%
 # Prepare helpers for training.
-config["dirname"] = os.path.join(os.getcwd(), 'data') # this is the directory where the data is stored
+config["dirname"] = joinCWD('data') # this is the directory where the data is stored
 dirs, config, session = utils.prepare_dirs(config)
 # %%
 # Load data.
@@ -154,8 +153,6 @@ if config['compile']:
 callbacks = [
     EarlyStopping(monitor='val_loss', patience=30, verbose=1, mode='min'),
 ]
-# if not config["fast"]:
-#     callbacks.append(utils.LRFinder(num_training_steps=200))
 trainer_args = {
     "callbacks": [
         *(callbacks if config["trainer"] != "lbfgs" else []),
@@ -176,10 +173,7 @@ except (RuntimeError, KeyboardInterrupt, ValueError) as e:
     error = str(traceback.format_exc())
     print(error)
     print('Training failed. Saving model anyway (backing up previous model).')
-    if os.path.exists(dirs["model_path"]):
-        shutil.copy(dirs["model_path"], dirs["model_path"][:-4] + '_backup.pkl')
-    if os.path.exists(dirs["config_path"]):
-        shutil.copy(dirs["config_path"], dirs["config_path"][:-5] + '_backup.json')
+    backupPreviousModel(dirs)
     
 #save metadata
 with open(dirs["config_path"], 'w') as f:

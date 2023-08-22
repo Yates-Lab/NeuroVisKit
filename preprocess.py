@@ -15,7 +15,8 @@ from models.utils import plot_stas, eval_model
 from models import CNNdense, Shifter
 from NDNT.utils import get_max_samples, load_model
 from NDNT.training import Trainer, EarlyStopping
-from utils.utils import initialize_gaussian_envelope, memory_clear, seed_everything, get_datasets, plot_transients
+from utils.utils import initialize_gaussian_envelope, get_datasets, plot_transients
+from _utils.utils import seed_everything, memory_clear
 import utils.preprocess as utils
 from matplotlib.backends.backend_pdf import PdfPages
 seed_everything(0)

@@ -1,9 +1,10 @@
-from .utils import initialize_gaussian_envelope, seed_everything
+from _utils.utils import seed_everything
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from models import ModelWrapper, CNNdense
+from utils import regularization
 # from unet import UNet, BioV
 import math
 from tqdm import tqdm
@@ -471,6 +472,25 @@ class CoreC(nn.Module):
         # x shape is (1, 20, t, h, w)
         x = x.squeeze(0).permute(1, 0, 2, 3)
         return self.c2(x) # shape is (t, 20, h, w)
+    
+class DenseReadoutC(nn.Module):
+    def __init__(self,
+        input_dims, 
+        num_filters,
+        # reg_vals={'glocalx':.1, 'l2':0.1},
+        # reg_vals_feat={'l1':0.01},
+        **kwargs):
+        super().__init__()
+        self.input_dims=input_dims
+        self.num_filters=num_filters
+        self.feature = nn.Parameter(torch.randn([input_dims[0], num_filters]))
+        self.space = nn.Parameter(torch.randn([*input_dims[1:], num_filters]))
+        self.freg = regularization.l1(0.01/10)
+        self.sreg = regularization.Compose(regularization.glocal(0.1, (*input_dims[1:], num_filters), (0, 1)), regularization.l2(0.1))
+    def forward(self, x):
+        return torch.einsum('tcxy,cn,xyn->tn',x,self.feature,self.space)
+    def compute_reg_loss(self):
+        return self.freg(self.feature)# + self.sreg(self.space)
 
 class ReadoutC(nn.Module):
     def __init__(self, input_dims, ncids, nlags=36):
@@ -505,7 +525,8 @@ class CNNC(nn.Module):
         super().__init__()
         # input_dims is (c, x, y, nlags)
         self.core = CoreC(input_dims[:3], nl, input_dims[-1])
-        self.readout = ReadoutC([20, *input_dims[1:3]], ncids, input_dims[-1])
+        self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
+        # self.readout = ReadoutC([20, *input_dims[1:3]], ncids, input_dims[-1])
         self.output_nl = output_nl
     def forward(self, x):
         x = self.core(x)
@@ -513,7 +534,7 @@ class CNNC(nn.Module):
         return self.output_nl(x)
     def compute_reg_loss(self, *args, **kwargs):
         reg = 0
-        for i in [self.core, self.readout]:
+        for i in self.children():
             if hasattr(i, 'compute_reg_loss'):
                 reg += i.compute_reg_loss(*args, **kwargs)
         return reg

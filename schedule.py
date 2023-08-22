@@ -10,7 +10,8 @@ from ray import tune, air
 from ray.tune.search.ax import AxSearch
 from ray.air.checkpoint import Checkpoint
 from ray.air import session
-from utils.utils import seed_everything, unpickle_data
+from _utils.utils import seed_everything
+from utils.utils import unpickle_data
 from utils.schedule import ModelGenerator, get_train_loop, get_test_objective
 from utils.get_models import get_model
 init_seed = 0

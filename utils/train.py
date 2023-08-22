@@ -4,12 +4,138 @@ import NDNT
 from utils.trainer import train
 from models import ModelWrapper, CNNdense
 from utils.get_models import get_cnn
-from utils.utils import seed_everything
+from _utils.utils import seed_everything
 from dadaptation import DAdaptAdam, DAdaptSGD, DAdaptAdaGrad
 from dog import DoG, LDoG
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import TensorDataset
+from tqdm import tqdm
 
+class InMemoryContiguousDataset(torch.utils.data.Dataset):
+    def __init__(self, ds, inds=None):
+        super().__init__()
+        self.ds = ds
+        self.inds = inds or list(range(len(ds)))
+        self.block = []
+        self.dictionary = self.build_dataset()
+    def preload(self, device):
+        for k, v in self.dictionary.items():
+            self.dictionary[k] = v.to(device)
+    def __getitem__(self, index):
+        if type(index) is int:
+            relevant_blocks = [self.block[index]]
+        elif type(index) is list:
+            relevant_blocks = [self.block[i] for i in index]
+        else:
+            relevant_blocks = self.block[index]
+        inds = [i for block in relevant_blocks for i in range(*block)]
+        return {k: v[inds] for k, v in self.dictionary.items()}
+    def __len__(self):
+        return len(self.block)
+    def build_dataset(self):
+        stim = []
+        robs = []
+        eyepos = []
+        dfs = []
+        bstart = 0
+        print("building dataset")
+        for ii in tqdm(self.inds):
+            batch = self.ds[ii]
+            stim.append(batch['stim'])
+            robs.append(batch['robs'])
+            eyepos.append(batch['eyepos'])
+            dfs.append(batch['dfs'])
+            bstop = bstart + batch['stim'].shape[0]
+            self.block.append((bstart, bstop))
+            bstart = bstop
+        stim = torch.cat(stim, dim=0)
+        robs = torch.cat(robs, dim=0)
+        eyepos = torch.cat(eyepos, dim=0)
+        dfs = torch.cat(dfs, dim=0)
+        return {
+            "stim": stim,
+            "robs": robs,
+            "eyepos": eyepos,
+            "dfs": dfs,
+        }
+        
+class InMemoryContiguousDataset2(torch.utils.data.Dataset):
+    def __init__(self, ds, inds=None):
+        super().__init__()
+        self.ds = ds
+        self.inds = inds or list(range(len(ds)))
+        self.list = []
+        self.build_dataset()
+    def preload(self, device):
+        for batch in self.list:
+            for k, v in batch.items():
+                batch[k] = v.to(device)
+    def __getitem__(self, index):
+        if type(index) is int:
+            return self.list[index]
+        elif type(index) is slice:
+            items = self.list[index]
+        else:
+            items = [self.list[i] for i in index]
+        return {k: torch.cat([d[k] for d in items], dim=0) for k in items[0].keys()}
+    def __len__(self):
+        return len(self.list)
+    def build_dataset(self):
+        print("building dataset")
+        for ii in tqdm(self.inds):
+            batch = self.ds[ii]
+            self.list.append(batch)
+            
+class InMemoryContiguousDataset3(TensorDataset):
+    def __init__(self, ds, inds=None):
+        self.inds = inds or list(range(len(ds)))
+        self.block = []
+        dictionary = self.build_dataset(ds)
+        self.keys = list(dictionary.keys())
+        super().__init__(*dictionary.values())
+    def preload(self, device):
+        self.tensors = [t.to(device) for t in self.tensors]
+    def __getitem__(self, index):
+        if type(index) is int:
+            relevant_blocks = [self.block[index]]
+        elif type(index) is list:
+            relevant_blocks = [self.block[i] for i in index]
+        else:
+            relevant_blocks = self.block[index]
+        inds = [i for block in relevant_blocks for i in range(*block)]
+        values = super().__getitem__(inds)
+        return {k: v for k, v in zip(self.keys, values)}
+    def __len__(self):
+        return len(self.block)
+    def build_dataset(self, ds):
+        stim = []
+        robs = []
+        eyepos = []
+        dfs = []
+        bstart = 0
+        print("building dataset")
+        for ii in tqdm(self.inds):
+            batch = ds[ii]
+            stim.append(batch['stim'])
+            robs.append(batch['robs'])
+            eyepos.append(batch['eyepos'])
+            dfs.append(batch['dfs'])
+            bstop = bstart + batch['stim'].shape[0]
+            self.block.append((bstart, bstop))
+            bstart = bstop
+        stim = torch.cat(stim, dim=0)
+        robs = torch.cat(robs, dim=0)
+        eyepos = torch.cat(eyepos, dim=0)
+        dfs = torch.cat(dfs, dim=0)
+        return {
+            "stim": stim,
+            "robs": robs,
+            "eyepos": eyepos,
+            "dfs": dfs,
+        }
+
+    
 def smooth_robs(x, smoothN=10):
     smoothkernel = torch.ones((1, 1, smoothN, 1), device=device) / smoothN
     out = F.conv2d(

@@ -6,7 +6,8 @@ import os, sys, getopt, __main__
 import json
 import torch
 import dill
-from utils.utils import seed_everything, unpickle_data, get_datasets
+from utils.utils import unpickle_data, get_datasets
+from _utils.utils import seed_everything
 import utils.train as utils
 from utils.loss import get_loss
 from utils.get_models import get_model

@@ -2,6 +2,8 @@
     Analysis of trained models.
 '''
 #%%
+#!%load_ext autoreload
+#!%autoreload 2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,20 +11,20 @@ import json
 import NDNT
 import numpy as np
 import dill
-import os, sys, getopt, __main__
-from utils.utils import unpickle_data, get_datasets, plot_transientsC, seed_everything, TimeLogger, get_opt_dict, uneven_tqdm, to_device
-from models.utils import plot_stas
+import os
+from utils.utils import plot_transientsC, TimeLogger, to_device
+from _utils.utils import isInteractive, get_opt_dict, seed_everything, joinCWD
 import utils.postprocess as utils
 import utils.lightning as lutils
 from models.utils.plotting import plot_sta_movie
 import matplotlib.pyplot as plt
-from utils.loss import NDNTLossWrapper
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
 from datasets.mitchell.pixel.fixation import FixationMultiDataset
 from matplotlib.animation import FuncAnimation
 from utils.mei import irfC
 import matplotlib.animation as animation
+#%%
 seed_everything(0)
 
 config = {
@@ -35,7 +37,7 @@ config = {
 }
 
 # Here we make sure that the script can be run from the command line.
-if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
+if not isInteractive():
     loaded_opts = get_opt_dict([
         ('n:', 'name='),
         ('d:', 'device=', torch.device),
@@ -43,18 +45,17 @@ if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
         # ('p', 'pytorch'),
         ('f', 'fast'),
         # ('l', 'load_preprocessed'),
-    ])
-    config.update(loaded_opts)
-
+    ], default=config)
+else:
+    pass # here you can interactively overwrite config options config["option"] = <new value>
 #%%
 # Determine paths.
 device = config['device']
 print("using device", str(device))
-config["dirname"] = os.path.join(os.getcwd(), 'data')
+config["dirname"] = joinCWD('data')
 dirs = lutils.get_dirnames(config)
 tosave_path = os.path.join(dirs['checkpoint_dir'], 'postprocess')
 logger = TimeLogger()
-
 #%%
 # Load.
 with open(os.path.join(dirs["session_dir"], 'session.pkl'), 'rb') as f:

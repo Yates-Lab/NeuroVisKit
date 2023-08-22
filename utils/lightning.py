@@ -90,23 +90,22 @@ class PreprocessFunction(nn.Module):
             x = self.PREPROCESS_DICT[op](x)
         return x
 
-class EvalModule(nn.Module):
-    def __init__(self, model):
-        super().__init__()
-        self.model = model
+class EvalModule:
+    def __init__(self, unit_loss, cids):
+        self.loss = unit_loss
+        self.cids = cids
         self.tsum, self.rsum, self.llsum = 0, 0, 0
     def reset(self):
         self.tsum, self.rsum, self.llsum = 0, 0, 0
-    def step(self, x):
-        rpred = self.model(x)
-        self.llsum += self.model.loss.unit_loss(
+    def step(self, x, rpred):
+        self.llsum += self.loss(
             rpred,
-            x["robs"][:, self.model.cids],
-            data_filters=x["dfs"][:, self.model.cids],
+            x["robs"][:, self.cids],
+            data_filters=x["dfs"][:, self.cids],
             temporal_normalize=False
         )
-        self.tsum += x["dfs"][:, self.model.cids].sum(dim=0)
-        self.rsum += (x["dfs"][:, self.model.cids]*x["robs"][:, self.model.cids]).sum(dim=0)
+        self.tsum += x["dfs"][:, self.cids].sum(dim=0)
+        self.rsum += (x["dfs"][:, self.cids]*x["robs"][:, self.cids]).sum(dim=0)
     def closure(self):
         assert type(self.llsum) is not int, "EvalModule has not been called yet"
         assert type(self.tsum) is not int, "EvalModule has not been called yet"
@@ -127,9 +126,9 @@ class PLWrapper(pl.LightningModule):
         self.opt_instance = None
         self.learning_rate = lr
         self.preprocess_data = preprocess_data
-        self.eval_module = EvalModule(wrapped_model)
-        if hasattr(self.wrapped_model, 'cids'):
-            self.cids = self.wrapped_model.cids
+        assert hasattr(self.wrapped_model, 'cids'), "model must have cids attribute"
+        self.cids = self.wrapped_model.cids
+        self.eval_module = EvalModule(self.loss.unit_loss, self.cids)
         self.save_hyperparameters(ignore=['wrapped_model', 'preprocess_data'])
         
     def forward(self, x):
@@ -158,7 +157,7 @@ class PLWrapper(pl.LightningModule):
     def validation_step(self, x, batch_idx=0, dataloader_idx=0):
         x = self.preprocess_data(x)
         losses = self.wrapped_model.validation_step(x)
-        self.eval_module.step(x)
+        self.eval_module.step(x, self(x))
         self.log("val_loss_poisson", losses["val_loss"], prog_bar=True, on_epoch=True, batch_size=len(x["stim"]))
         del x
         return losses["val_loss"]
@@ -219,13 +218,14 @@ def sum_dict_list(dlist):
             dsum[k].append(v)
     return {k: torch.cat(v, dim=0) for k,v in dsum.items()}
 
-def get_fix_dataloader(ds, inds, batch_size=1, num_workers=os.cpu_count()//2, device=None):
+def get_fix_dataloader(ds, inds, batch_size=1, device=None):
     sampler = BatchSampler(
         SubsetRandomSampler(inds),
         batch_size=batch_size,
         drop_last=True
     )
-    dl = DataLoader(ds, sampler=sampler, batch_size=None, num_workers=num_workers, pin_memory=device is not None, pin_memory_device=device)
+    num_workers=os.cpu_count()//2 if device is None else 0
+    dl = DataLoader(ds, sampler=sampler, batch_size=None, num_workers=num_workers)#, pin_memory=device is not None, pin_memory_device=device)
     return dl
 
 class ArrayDataset(Dataset):
