@@ -20,12 +20,9 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from utils.lightning import PLWrapper, get_fix_dataloader
 import utils.lightning as utils
-import logging
 from _utils.utils import isInteractive, get_opt_dict
 from _utils.train import backupPreviousModel
 from tqdm import tqdm
-logging.getLogger("pytorch_lightning.utilities.rank_zero").addHandler(logging.NullHandler())
-torch.set_float32_matmul_precision("medium")
 #%%
 seed_everything(0)
 
@@ -41,7 +38,7 @@ config_defaults = {
     'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss,
     'pretrained_core': None,
     'defrost': False,
-    'batch_size': 3,
+    'batch_size': 1,
     'seed': 420,
     'device': '1,',
     'session': '20200304C',
@@ -51,6 +48,7 @@ config_defaults = {
     'lightning': True,
     'fast': False,
     'compile': False,
+    'accumulate_batches': 3,
 }
 
 # Here we make sure that the script can be run from the command line.
@@ -75,6 +73,7 @@ if not isInteractive():
         (None, 'load_preprocessed'),
         ('f', 'fast'),
         ('c', 'compile'),
+        ('a:', 'accumulate_batches=', int)
     ], default=config_defaults)
     if config_defaults['from_checkpoint']:
         with open(joinCWD('data', 'models', config_defaults["name"], 'config.json'), 'r') as f:
@@ -160,6 +159,7 @@ trainer_args = {
     ],
     "accelerator": "cpu" if config["device"] == 'cpu' else "gpu",
     "logger": TensorBoardLogger(dirs["checkpoint_dir"], version=0),
+    "accumulate_grad_batches": config["accumulate_batches"],
 }
 if config["device"] != 'cpu':
     trainer_args["devices"] = config["device"]

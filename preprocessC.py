@@ -34,7 +34,6 @@ from random import shuffle
 from tqdm import tqdm
 import torch.nn as nn
 from copy import deepcopy
-from utils.utils import seed_everything
 seed_everything(0)
 
 device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')

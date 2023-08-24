@@ -10,14 +10,23 @@ import numpy as np
 import utils.get_models as get_models
 from utils.utils import to_device
 import moten
+import warnings
+import logging
+logging.getLogger("pytorch_lightning.utilities.rank_zero").addHandler(logging.NullHandler())
+torch.set_float32_matmul_precision("medium")
+warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
 def time_embedding(x, num_lags):
     # x is (time, n)
     # output is (time - num_lags, num_lags, n)
+    # print("embedding input shape", x.shape)
     tensorlist = [x[i:i+num_lags] for i in range(x.shape[0] - num_lags + 1)]
     assert len(tensorlist) != 0, x.shape
     out = torch.stack(tensorlist, dim=0)
-    return out.permute(0,2,1).reshape(len(out), -1)
+    dims = [0] + list(range(len(out.shape)))[2:] + [1]
+    out = out.permute(*dims)
+    # print("embedding shape", out.shape)
+    return out
 
 def pad_to_shape(x, shape, padding_mapper=lambda x: [0, x]):
     padding = []
@@ -42,9 +51,12 @@ def pad_to_shape(x, shape, padding_mapper=lambda x: [0, x]):
 
 def get_embed_function(num_lags=36):
     def embed(x):
-        x["stim"] = time_embedding(x["stim"].flatten(1), num_lags)
+        if "embedded" in x:
+            return x
+        x["stim"] = time_embedding(x["stim"], num_lags)
         x["dfs"] = x["dfs"][num_lags-1:]
         x["robs"] = x["robs"][num_lags-1:]
+        x["embedded"] = True
         return x
     return embed
 
@@ -79,7 +91,7 @@ class PreprocessFunction(nn.Module):
             "binarize": binarize,
             "gabor": GaborPreprocess((70, 70), fps=240),
             "trim": Trim(),
-            "time_embed": get_embed_function(36),
+            "time_embed": get_embed_function(24),
         }
         for k, v in self.PREPROCESS_DICT.items():
             if isinstance(v, nn.Module):
@@ -224,8 +236,11 @@ def get_fix_dataloader(ds, inds, batch_size=1, device=None):
         batch_size=batch_size,
         drop_last=True
     )
-    num_workers=os.cpu_count()//2 if device is None else 0
-    dl = DataLoader(ds, sampler=sampler, batch_size=None, num_workers=num_workers)#, pin_memory=device is not None, pin_memory_device=device)
+    if device is None or device == "cpu":
+        num_workers=os.cpu_count()//2
+        dl = DataLoader(ds, sampler=sampler, batch_size=None, num_workers=num_workers)#, pin_memory=device is not None, pin_memory_device=device)
+    else:
+        dl = DataLoader(ds, sampler=sampler, batch_size=None)
     return dl
 
 class ArrayDataset(Dataset):

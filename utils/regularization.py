@@ -4,6 +4,7 @@ from torch import nn
 from torch.nn.modules.utils import _reverse_repeat_tuple
 from torch.nn import functional as F
 import numpy as np
+from functools import reduce
 
 def get_regs_dict():
     return {
@@ -48,12 +49,14 @@ class RegularizationModule(nn.Module):
             x = self.target
         if normalize:
             x = x / x.norm()
-        return torch.mean(self.function(x) * self.coefficient)
+        y = torch.mean(self.function(x) * self.coefficient)
+        # print(f'{self.__class__.__name__}: {y}')
+        return y
 
 class Compose(nn.Module):
-    def __init__(self, *args):
+    def __init__(self, *RegModules):
         super().__init__()
-        self.args = nn.ModuleList(args)
+        self.args = nn.ModuleList(RegModules)
     def forward(self, x=None):
         return sum([arg(x) for arg in self.args])
     
@@ -62,7 +65,9 @@ class Pnorm(RegularizationModule):
         super().__init__(coefficient=coefficient, **kwargs)
         self.p = kwargs.get('p', 2)
     def function(self, x):
-        return (torch.abs(x)**self.p).mean()
+        out = (torch.abs(x)**self.p).sum()
+        with torch.no_grad():
+            return out/x.numel()
     
 class Pnorm_full(RegularizationModule):
     def __init__(self, coefficient=1, **kwargs):
@@ -72,7 +77,9 @@ class Pnorm_full(RegularizationModule):
         # p
         dims = [i for i in range(len(self.shape)) if i not in self.keepdims]
         numel = torch.prod(torch.tensor([self.shape[i] for i in dims]))
-        return x.norm(self.p, dim=dims) / numel**(1/self.p)
+        out = x.norm(self.p, dim=dims).sum()
+        with torch.no_grad():
+            return out/numel**(1/self.p)
     
 class l1(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
@@ -125,7 +132,9 @@ class local(RegularizationModule):
             temp = w_permuted @ mat
             temp = (temp * w_permuted).sum(dim=1)
             
-            pen = pen + temp/(mat.shape[0])
+            with torch.no_grad():
+                temp = temp/mat.shape[0]
+            pen += temp
             # # sum over all unpenalized dimensions
             # if self.is_global:
             #     w_permuted = w_permuted.sum(dim=1).unsqueeze(1)
@@ -134,8 +143,8 @@ class local(RegularizationModule):
             # temp = torch.einsum('nci,ij->nj', w_permuted, mat)
             # temp = torch.einsum('ni,nci->n', temp, w_permuted)
             # pen = pen + temp
-
-        return pen/self.norm
+        with torch.no_grad():
+            return pen/self.norm
 
 class glocal(local):
     def __init__(self, coefficient=1, shape=None, dims=None, **kwargs):

@@ -9,6 +9,7 @@ from utils import regularization
 import math
 from tqdm import tqdm
 import moten
+from models.cnns import DenseReadout as DenseReadoutNDNT
 
 class PytorchWrapper(ModelWrapper):
     def __init__(self, *args, cids=None, bypass_preprocess=False, **kwargs):
@@ -456,7 +457,7 @@ class CoreC(nn.Module):
         self.input_dims = input_dims
         self.nl = nl
         self.num_lags = num_lags
-        self.c1 = CBlock3D(input_dims[0], 20, k=(36, 11, 11), padding=0)
+        self.c1 = CBlock3D(input_dims[0], 20, k=(num_lags, 11, 11), padding=0)
         self.c2 = nn.Sequential(
             CBlock2D(20, 20, k=11, padding="same"),
             CBlock2D(20, 20, k=11, padding="same"),
@@ -485,12 +486,16 @@ class DenseReadoutC(nn.Module):
         self.num_filters=num_filters
         self.feature = nn.Parameter(torch.randn([input_dims[0], num_filters]))
         self.space = nn.Parameter(torch.randn([*input_dims[1:], num_filters]))
-        self.freg = regularization.l1(0.01/10)
-        self.sreg = regularization.Compose(regularization.glocal(0.1, (*input_dims[1:], num_filters), (0, 1)), regularization.l2(0.1))
+        self.bias = nn.Parameter(torch.zeros([num_filters]))
+        self.freg = regularization.l1(1e-2)
+        self.sreg = regularization.Compose(regularization.glocal(1e-1, (*input_dims[1:], num_filters), (0, 1)), regularization.l2(1e-1))
     def forward(self, x):
-        return torch.einsum('tcxy,cn,xyn->tn',x,self.feature,self.space)
+        return torch.einsum('tcxy,cn,xyn->tn',x,self.feature,self.space) + self.bias
     def compute_reg_loss(self):
-        return self.freg(self.feature)# + self.sreg(self.space)
+        regs = []
+        regs.append(self.freg(self.feature))
+        regs.append(self.sreg(self.space))
+        return sum(regs)#/len(regs)
 
 class ReadoutC(nn.Module):
     def __init__(self, input_dims, ncids, nlags=36):
@@ -523,15 +528,26 @@ class ReadoutC(nn.Module):
 class CNNC(nn.Module):
     def __init__(self, input_dims, ncids, nl=F.softplus, output_nl=F.softplus):
         super().__init__()
+        print(input_dims[-1], "lags")
         # input_dims is (c, x, y, nlags)
         self.core = CoreC(input_dims[:3], nl, input_dims[-1])
-        self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
+        # self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
+        self.readout = DenseReadoutNDNT(input_dims=[20, *input_dims[1:3], 1],
+            num_filters=ncids,
+            pos_constraint = False,
+            NLtype='lin',
+            window='hamming',
+            bias=True,
+            reg_vals = {'glocalx':.1, 'l2':0.1},
+            reg_vals_feat = {'l1':0.01},
+            )
+        self.readout.build_reg_modules()
         # self.readout = ReadoutC([20, *input_dims[1:3]], ncids, input_dims[-1])
         self.output_nl = output_nl
     def forward(self, x):
         x = self.core(x)
-        x = self.readout(x)
-        return self.output_nl(x)
+        x = self.readout(x.unsqueeze(-1))
+        return self.output_nl((x-0.4)/0.4)
     def compute_reg_loss(self, *args, **kwargs):
         reg = 0
         for i in self.children():
@@ -546,7 +562,51 @@ def get_cnnc(config_init):
             cids=config['cids']
         )
     return get_cnnc_helper
-        
+
+class CNN_time_embed(nn.Module):
+    def __init__(self, input_dims, ncids, nl=F.softplus, output_nl=F.softplus):
+        super().__init__()
+        print(input_dims[-1], "lags")
+        # input_dims is (c, x, y, nlags)
+        self.core = nn.Sequential(
+            CBlock2D(input_dims[-1], 20, k=11, padding="same"),
+            CBlock2D(20, 20, k=11, padding="same"),
+            CBlock2D(20, 20, k=11, padding="same"),
+            CBlock2D(20, 20, k=11, padding="same"),
+        )
+        # self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
+        self.readout = DenseReadoutNDNT(input_dims=[20, *input_dims[1:3], 1],
+            num_filters=ncids,
+            pos_constraint = False,
+            NLtype='lin',
+            window='hamming',
+            bias=True,
+            reg_vals = {'glocalx':.1, 'l2':0.1},
+            reg_vals_feat = {'l1':0.01},
+            )
+        self.readout.build_reg_modules()
+        # self.readout = ReadoutC([20, *input_dims[1:3]], ncids, input_dims[-1])
+        self.output_nl = output_nl
+    def forward(self, x):
+        x = x.squeeze(1).permute(0, 3, 1, 2)
+        x = self.core(x)
+        x = self.readout(x.unsqueeze(-1))
+        return self.output_nl((x-0.4)/0.4)
+    def compute_reg_loss(self, *args, **kwargs):
+        reg = 0
+        for i in self.children():
+            if hasattr(i, 'compute_reg_loss'):
+                reg += i.compute_reg_loss(*args, **kwargs)
+        return reg
+
+def get_cnn_time_embed(config_init):
+    def get_cnnc_helper(config, device='cpu'):
+        return PytorchWrapper(
+            CNN_time_embed(config_init['input_dims'], len(config['cids'])),
+            cids=config['cids']
+        )
+    return get_cnnc_helper
+
 # def get_attention_cnn(config_init):
 #     def get_attention_cnn_helper(config, device='cpu'):
 #         cnn = get_cnn(config_init)(config, device)
@@ -654,6 +714,7 @@ MODEL_DICT = {
     'gaborC': get_gaborC,
     'seperableCNN': get_separable_cnn,
     'cnnc': get_cnnc,
+    'cnn_time_embed': get_cnn_time_embed,
 }
 
 def verify_config(config):
