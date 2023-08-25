@@ -484,18 +484,24 @@ class DenseReadoutC(nn.Module):
         super().__init__()
         self.input_dims=input_dims
         self.num_filters=num_filters
-        self.feature = nn.Parameter(torch.randn([input_dims[0], num_filters]))
-        self.space = nn.Parameter(torch.randn([*input_dims[1:], num_filters]))
+        self.feature = nn.Parameter(torch.randn([input_dims[0], num_filters])) # (c, n)
+        self.space = nn.Parameter(torch.randn([*input_dims[1:], num_filters])) # (x, y, n)
         self.bias = nn.Parameter(torch.zeros([num_filters]))
-        self.freg = regularization.l1(1e-2)
-        self.sreg = regularization.Compose(regularization.glocal(1e-1, (*input_dims[1:], num_filters), (0, 1)), regularization.l2(1e-1))
+        nn.init.kaiming_uniform_(self.feature, a=1/num_filters)#, mode='fan_out')
+        nn.init.kaiming_uniform_(self.space, a=1/num_filters)#, mode='fan_out')
+        self.reg = regularization.Compose(
+            regularization.glocalNDNT(1e-1, target=self.space, dims=(0, 1), keepdims=2),
+            regularization.l2NDNT(1e-1, keepdims=-1, target=self.space),
+            regularization.l1NDNT(1e-2, keepdims=-1, target=self.feature)
+        )
     def forward(self, x):
+        # print(x.shape)
         return torch.einsum('tcxy,cn,xyn->tn',x,self.feature,self.space) + self.bias
     def compute_reg_loss(self):
-        regs = []
-        regs.append(self.freg(self.feature))
-        regs.append(self.sreg(self.space))
-        return sum(regs)#/len(regs)
+        # regs = []
+        # regs.append(self.freg(self.feature))
+        # regs.append(self.sreg(self.space))
+        return self.reg()
 
 class ReadoutC(nn.Module):
     def __init__(self, input_dims, ncids, nlags=36):
@@ -531,29 +537,29 @@ class CNNC(nn.Module):
         print(input_dims[-1], "lags")
         # input_dims is (c, x, y, nlags)
         self.core = CoreC(input_dims[:3], nl, input_dims[-1])
-        # self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
-        self.readout = DenseReadoutNDNT(input_dims=[20, *input_dims[1:3], 1],
-            num_filters=ncids,
-            pos_constraint = False,
-            NLtype='lin',
-            window='hamming',
-            bias=True,
-            reg_vals = {'glocalx':.1, 'l2':0.1},
-            reg_vals_feat = {'l1':0.01},
-            )
-        self.readout.build_reg_modules()
+        self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
+        # self.readout = DenseReadoutNDNT(input_dims=[20, *input_dims[1:3], 1],
+        #     num_filters=ncids,
+        #     pos_constraint = False,
+        #     NLtype='lin',
+        #     # window='hamming',
+        #     bias=True,
+        #     reg_vals = {'glocalx':.1, 'l2':0.1},
+        #     reg_vals_feat = {'l1':0.01},
+        #     )
+        # self.readout.build_reg_modules()
         # self.readout = ReadoutC([20, *input_dims[1:3]], ncids, input_dims[-1])
         self.output_nl = output_nl
     def forward(self, x):
         x = self.core(x)
-        x = self.readout(x.unsqueeze(-1))
-        return self.output_nl((x-0.4)/0.4)
+        x = self.readout(x)#.unsqueeze(-1))
+        return self.output_nl(x)#(x-0.4)/0.4)
     def compute_reg_loss(self, *args, **kwargs):
-        reg = 0
-        for i in self.children():
-            if hasattr(i, 'compute_reg_loss'):
-                reg += i.compute_reg_loss(*args, **kwargs)
-        return reg
+        # reg = 0
+        # for i in self.children():
+        #     if hasattr(i, 'compute_reg_loss'):
+        #         reg += i.compute_reg_loss(*args, **kwargs)
+        return self.readout.compute_reg_loss(*args, **kwargs)
 
 def get_cnnc(config_init):
     def get_cnnc_helper(config, device='cpu'):
@@ -574,30 +580,30 @@ class CNN_time_embed(nn.Module):
             CBlock2D(20, 20, k=11, padding="same"),
             CBlock2D(20, 20, k=11, padding="same"),
         )
-        # self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
-        self.readout = DenseReadoutNDNT(input_dims=[20, *input_dims[1:3], 1],
-            num_filters=ncids,
-            pos_constraint = False,
-            NLtype='lin',
-            window='hamming',
-            bias=True,
-            reg_vals = {'glocalx':.1, 'l2':0.1},
-            reg_vals_feat = {'l1':0.01},
-            )
-        self.readout.build_reg_modules()
+        self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
+        # self.readout = DenseReadoutNDNT(input_dims=[20, *input_dims[1:3], 1],
+        #     num_filters=ncids,
+        #     pos_constraint = False,
+        #     NLtype='lin',
+        #     window='hamming',
+        #     bias=True,
+        #     reg_vals = {'glocalx':.1, 'l2':0.1},
+        #     reg_vals_feat = {'l1':0.01},
+        #     )
+        # self.readout.build_reg_modules()
         # self.readout = ReadoutC([20, *input_dims[1:3]], ncids, input_dims[-1])
         self.output_nl = output_nl
     def forward(self, x):
         x = x.squeeze(1).permute(0, 3, 1, 2)
         x = self.core(x)
-        x = self.readout(x.unsqueeze(-1))
+        x = self.readout(x)#.unsqueeze(-1))
         return self.output_nl((x-0.4)/0.4)
     def compute_reg_loss(self, *args, **kwargs):
-        reg = 0
-        for i in self.children():
-            if hasattr(i, 'compute_reg_loss'):
-                reg += i.compute_reg_loss(*args, **kwargs)
-        return reg
+        # reg = 0
+        # for i in self.children():
+        #     if hasattr(i, 'compute_reg_loss'):
+        #         reg += i.compute_reg_loss(*args, **kwargs)
+        return self.readout.compute_reg_loss(*args, **kwargs)
 
 def get_cnn_time_embed(config_init):
     def get_cnnc_helper(config, device='cpu'):

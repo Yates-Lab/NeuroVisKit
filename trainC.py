@@ -38,7 +38,7 @@ config_defaults = {
     'override_output_NL': False, # this overrides the output nonlinearity of the model according to the loss,
     'pretrained_core': None,
     'defrost': False,
-    'batch_size': 1,
+    'batch_size': 3,
     'seed': 420,
     'device': '1,',
     'session': '20200304C',
@@ -48,7 +48,7 @@ config_defaults = {
     'lightning': True,
     'fast': False,
     'compile': False,
-    'accumulate_batches': 3,
+    'accumulate_batches': 1,
 }
 
 # Here we make sure that the script can be run from the command line.

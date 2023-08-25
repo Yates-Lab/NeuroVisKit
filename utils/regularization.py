@@ -5,6 +5,7 @@ from torch.nn.modules.utils import _reverse_repeat_tuple
 from torch.nn import functional as F
 import numpy as np
 from functools import reduce
+import math
 
 def get_regs_dict():
     return {
@@ -26,7 +27,7 @@ def _verify_dims(shape, dims):
     return out
             
 class RegularizationModule(nn.Module):
-    def __init__(self, coefficient=1, shape=None, dims=None, target=None, keepdims=0, **kwargs):
+    def __init__(self, coefficient=1, shape=None, dims=None, target=None, keepdims=None, **kwargs):
         super().__init__()
 
         if isinstance(dims, int):
@@ -42,7 +43,7 @@ class RegularizationModule(nn.Module):
         self.shape = shape
         self.coefficient = coefficient
         self.target = target
-        self.keepdims = _verify_dims(self.shape, keepdims)
+        self.keepdims = _verify_dims(self.shape, keepdims) if keepdims is not None else []
 
     def forward(self, x=None, normalize=False):
         if x is None:
@@ -89,6 +90,26 @@ class l2(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, **kwargs)
         self.p = 2
+        
+class l1NDNT(Pnorm):
+    def __init__(self, coefficient=1, **kwargs):
+        super().__init__(coefficient=coefficient, **kwargs)
+        self.p = 1
+    def function(self, x):
+        x = torch.abs(x)
+        x = x.permute(*self.keepdims, *[i for i in range(len(x.shape)) if i not in self.keepdims])
+        x = x.reshape(math.prod(self.keepdims), -1)
+        return x.mean(-1).mean()
+class l2NDNT(Pnorm):
+    def __init__(self, coefficient=1, **kwargs):
+        super().__init__(coefficient=coefficient, **kwargs)
+        self.p = 2
+    def function(self, x):
+        x = x**self.p
+        x = x.permute(*self.keepdims, *[i for i in range(len(x.shape)) if i not in self.keepdims])
+        x = x.reshape(math.prod(self.keepdims), -1)
+        return x.mean(-1).mean()
+    
 class l4(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, **kwargs)
@@ -150,6 +171,50 @@ class glocal(local):
     def __init__(self, coefficient=1, shape=None, dims=None, **kwargs):
         super().__init__(coefficient=coefficient, shape=shape, dims=dims, is_global=True, **kwargs)
         # print('glocal is the same as local')
+        
+class glocalNDNT(RegularizationModule):
+    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
+        super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
+        assert self.shape is not None, 'Must specify expected shape of item to be penalized'
+        self.dims = _verify_dims(self.shape, dims)
+        self.leftover_dims = [i for i in range(len(self.shape)) if i not in self.dims and i not in self.keepdims]
+        self.norm = np.mean([self.shape[i] for i in self.dims])#np.prod([self.shape[i] for i in self.dims])**(1/len(self.dims))
+        for ind in self.dims:
+            i = self.shape[ind]
+            v = ((torch.arange(i)-torch.arange(i)[:,None])**2).float()/i**2 # shape = (i,j)
+            self.register_buffer(f'local_pen{ind}', v)
+    def function(self, x):
+        # 0, 1
+        # 80, 80, 65
+        w = x**2
+        w = w.permute(*self.dims, *self.leftover_dims, *self.keepdims)
+        w = w.reshape(
+            *[self.shape[i] for i in self.dims],
+            -1,
+            reduce(lambda x,y:x*y, [self.shape[i] for i in self.keepdims], 1),
+        ) # reshape to dims, -1, flattened keepdims
+        pen = 0
+        for ind, dim in enumerate(self.dims):
+            mat = getattr(self, f'local_pen{dim}') # shape = (i,j)
+            w_permuted_shape = list(range(len(w.shape))) # [*dims.shape, -1, prod(keepdims.shape)]
+            w_permuted_shape.remove(ind)
+            w_permuted = w.permute(w_permuted_shape+[ind])
+            w_permuted = w_permuted.sum(list(range(len(w_permuted.shape)-2)))
+            temp = w_permuted @ mat
+            temp = torch.einsum('nj,nj->n', temp, w_permuted)
+            pen = pen + temp
+        return pen.mean()
+        # w = x**2
+        # pen = 0
+        # for dim in self.dims:
+        #     mat = getattr(self, f'local_pen{dim}')
+        #     w_permuted = w.permute(*[i for i in range(len(self.shape)) if i not in [dim]], *[dim])
+        #     w_permuted = w_permuted.reshape(self.shape[0], -1, *[self.shape[i] for i in [dim]])
+        #     w_permuted = w_permuted.mean(dim=1)
+        #     temp = w_permuted @ mat
+        #     temp = (temp * w_permuted).sum(dim=1)
+        #     pen = temp + pen
+        # return pen.mean()
         
 class edge(RegularizationModule):
     def __init__(self, coefficient=1, dims=None, **kwargs):

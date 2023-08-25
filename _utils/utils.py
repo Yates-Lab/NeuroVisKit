@@ -13,12 +13,14 @@ def isInteractive():
 
 def get_opt_dict(opt_config, default=None):
     """
-        Get requested options from command line as a dictionary
-        Takes in a list of tuples, where each tuple is one of four options:
-        1. (-shorthand:, --option=, func) which applies a function on the argument
-        2. (-shorthand:, --option=) which does not apply a function on the argument
-        3. (-shorthand, --option, default) which sets argument to default
-        4. (-shorthand, --option) which sets argument to True
+        Get the requested options from command line as a dictionary
+        opt_config: takes in a list of tuples, where each tuple is one of four options:
+        A. options that take an argument from the command line
+            1. (shorthand:, fullname=, func) applies a function on the argument
+            2. (shorthand:, fullname=) gives the argument as a string
+        B. options that do not take an argument from the command line
+            3. (shorthand, fullname, value) sets argument to value if the option is present
+            4. (shorthand, fullname) sets argument to True if the option is present
     """
     argv = sys.argv[1:]
     opt_names = [i[1] for i in opt_config if i[1]]
