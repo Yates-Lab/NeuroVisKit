@@ -73,7 +73,8 @@ if not isInteractive():
         (None, 'load_preprocessed'),
         ('f', 'fast'),
         ('c', 'compile'),
-        ('a:', 'accumulate_batches=', int)
+        ('a:', 'accumulate_batches=', int),
+        ('r:', 'lr=', float),
     ], default=config_defaults)
     if config_defaults['from_checkpoint']:
         with open(joinCWD('data', 'models', config_defaults["name"], 'config.json'), 'r') as f:

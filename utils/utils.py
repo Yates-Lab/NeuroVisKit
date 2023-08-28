@@ -14,7 +14,13 @@ from functools import reduce
 from IPython.display import Video
 import imageio
 from _utils.utils import memory_clear
+import torch.nn as nn
 import cv2
+
+def KaimingTensor(shape, out_dim=-1, *args, **kwargs):
+    t = torch.empty(shape, *args, **kwargs)
+    nn.init.kaiming_uniform_(t, a=1/shape[out_dim])
+    return t
 
 def getattr_deep(obj, attr):
     return reduce(getattr, attr.split('.'), obj)

@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from models import ModelWrapper, CNNdense
 from utils import regularization
+from utils import utils
 # from unet import UNet, BioV
 import math
 from tqdm import tqdm
@@ -284,8 +285,9 @@ class separable_readout(nn.Module):
 #         return locality_loss(self.readout)/10
 
 class SeparableCore(nn.Module):
-    def __init__(self, input_dims):
+    def __init__(self, input_dims, nl=F.softplus):
         super().__init__()
+        self.nl = nl
         self.input_dims = input_dims # (1, x, y, nlags)
         self.c1 = nn.Conv3d(input_dims[0], 20, kernel_size=(11, 11, self.input_dims[-1]))
         self.bn1 = nn.BatchNorm2d(20)
@@ -300,16 +302,16 @@ class SeparableCore(nn.Module):
         x = self.c1(x)
         x = x.squeeze(0).permute(3, 0, 1, 2)
         x = self.bn1(x)
-        x = F.softplus(x)
+        x = self.nl(x)
         x = self.c2(x)
         x = self.bn2(x)
-        x = F.softplus(x)
+        x = self.nl(x)
         x = self.c3(x)
         x = self.bn3(x)
-        x = F.softplus(x)
+        x = self.nl(x)
         x = self.c4(x)
         x = self.bn4(x)
-        x = F.softplus(x)
+        x = self.nl(x)
         return x
 class SeparableCNN(nn.Module):
     def __init__(self, input_dims, ncids, nl=nn.Softplus()):
@@ -369,8 +371,8 @@ class CBlock3D(nn.Module):
         self.bn = nn.BatchNorm3d(cout)
         self.nl = nl
     def forward(self, x):
-        with torch.no_grad():
-            self.c.weight.data = shrink_conv_weights(self.c.weight.data, d=3)
+        # with torch.no_grad():
+        #     self.c.weight.data = shrink_conv_weights(self.c.weight.data, d=3)
         self.window()
         x = self.c(x)
         x = self.bn(x)
@@ -415,8 +417,8 @@ class CBlock2D(nn.Module):
         self.bn = nn.BatchNorm2d(cout)
         self.nl = nl
     def forward(self, x):
-        with torch.no_grad():
-            self.c.weight.data = shrink_conv_weights(self.c.weight.data, d=2)
+        # with torch.no_grad():
+        #     self.c.weight.data = shrink_conv_weights(self.c.weight.data, d=2)
         self.window()
         x = self.c(x)
         x = self.bn(x)
@@ -452,16 +454,16 @@ class CBlock2D(nn.Module):
         
     
 class CoreC(nn.Module):
-    def __init__(self, input_dims, nl=F.softplus, num_lags=36):
+    def __init__(self, input_dims, nl=F.softplus, num_lags=36, window=True):
         super().__init__()
         self.input_dims = input_dims
         self.nl = nl
         self.num_lags = num_lags
-        self.c1 = CBlock3D(input_dims[0], 20, k=(num_lags, 11, 11), padding=0)
+        self.c1 = CBlock3D(input_dims[0], 20, k=(num_lags, 11, 11), padding=0, window=window)
         self.c2 = nn.Sequential(
-            CBlock2D(20, 20, k=11, padding="same"),
-            CBlock2D(20, 20, k=11, padding="same"),
-            CBlock2D(20, 20, k=11, padding="same"),
+            CBlock2D(20, 20, k=11, padding="same", window=window),
+            CBlock2D(20, 20, k=11, padding="same", window=window),
+            CBlock2D(20, 20, k=11, padding="same", window=window),
         )
         # input is (t, *input_dims)
     def forward(self, x):
@@ -484,15 +486,16 @@ class DenseReadoutC(nn.Module):
         super().__init__()
         self.input_dims=input_dims
         self.num_filters=num_filters
-        self.feature = nn.Parameter(torch.randn([input_dims[0], num_filters])) # (c, n)
-        self.space = nn.Parameter(torch.randn([*input_dims[1:], num_filters])) # (x, y, n)
+        self.feature = nn.Parameter(utils.KaimingTensor([input_dims[0], num_filters])) # (c, n)
+        self.space = nn.Parameter(utils.KaimingTensor([*input_dims[1:], num_filters])) # (x, y, n)
         self.bias = nn.Parameter(torch.zeros([num_filters]))
-        nn.init.kaiming_uniform_(self.feature, a=1/num_filters)#, mode='fan_out')
-        nn.init.kaiming_uniform_(self.space, a=1/num_filters)#, mode='fan_out')
+        # nn.init.sparse_(self.feature, sparsity=0.9)
+        # nn.init.kaiming_uniform_(self.feature, a=1/num_filters)#, mode='fan_out')
+        # nn.init.kaiming_uniform_(self.space, a=1/num_filters)#, mode='fan_out')
         self.reg = regularization.Compose(
-            regularization.glocalNDNT(1e-1, target=self.space, dims=(0, 1), keepdims=2),
-            regularization.l2NDNT(1e-1, keepdims=-1, target=self.space),
-            regularization.l1NDNT(1e-2, keepdims=-1, target=self.feature)
+            regularization.local(1e-1, target=self.space, dims=(0, 1), keepdims=2),
+            regularization.l2(1e-7, keepdims=-1, target=self.space),
+            regularization.l1(1e-5, keepdims=-1, target=self.feature)
         )
     def forward(self, x):
         # print(x.shape)
@@ -536,7 +539,7 @@ class CNNC(nn.Module):
         super().__init__()
         print(input_dims[-1], "lags")
         # input_dims is (c, x, y, nlags)
-        self.core = CoreC(input_dims[:3], nl, input_dims[-1])
+        self.core = CoreC(input_dims[:3], nl, input_dims[-1], window=True)
         self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
         # self.readout = DenseReadoutNDNT(input_dims=[20, *input_dims[1:3], 1],
         #     num_filters=ncids,
@@ -575,10 +578,10 @@ class CNN_time_embed(nn.Module):
         print(input_dims[-1], "lags")
         # input_dims is (c, x, y, nlags)
         self.core = nn.Sequential(
-            CBlock2D(input_dims[-1], 20, k=11, padding="same"),
-            CBlock2D(20, 20, k=11, padding="same"),
-            CBlock2D(20, 20, k=11, padding="same"),
-            CBlock2D(20, 20, k=11, padding="same"),
+            CBlock2D(input_dims[-1], 20, k=11, padding="same", nl=nl),
+            CBlock2D(20, 20, k=11, padding="same", nl=nl),
+            CBlock2D(20, 20, k=11, padding="same", nl=nl),
+            CBlock2D(20, 20, k=11, padding="same", nl=nl),
         )
         self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
         # self.readout = DenseReadoutNDNT(input_dims=[20, *input_dims[1:3], 1],

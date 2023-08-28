@@ -25,8 +25,16 @@ def _verify_dims(shape, dims):
     assert len(set(out)) == len(out), 'Duplicate dimensions specified'
     out.sort()
     return out
+
+class Regularization(nn.Module):
+    """
+    Base class for regularization modules
+    Used for identifying regularization modules within a model.
+    """
+    def __init__(self):
+        super().__init__()
             
-class RegularizationModule(nn.Module):
+class RegularizationModule(Regularization):
     def __init__(self, coefficient=1, shape=None, dims=None, target=None, keepdims=None, **kwargs):
         super().__init__()
 
@@ -44,31 +52,92 @@ class RegularizationModule(nn.Module):
         self.coefficient = coefficient
         self.target = target
         self.keepdims = _verify_dims(self.shape, keepdims) if keepdims is not None else []
+        
+        self.log_gradients = kwargs.get('log_gradients', False)
 
     def forward(self, x=None, normalize=False):
         if x is None:
             x = self.target
+        if self.log_gradients:
+            x = self.log(x)
         if normalize:
             x = x / x.norm()
         y = torch.mean(self.function(x) * self.coefficient)
         # print(f'{self.__class__.__name__}: {y}')
         return y
 
-class Compose(nn.Module):
+    def log(self, x):
+        return gradMagLog.apply(x, self.__class__.__name__)
+        
+class Compose(Regularization):
     def __init__(self, *RegModules):
         super().__init__()
         self.args = nn.ModuleList(RegModules)
     def forward(self, x=None):
         return sum([arg(x) for arg in self.args])
+
+class gradMagLog(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, name, callback=lambda norm,name: print(name+":", norm)):
+        ctx.name = name
+        ctx.callback = callback
+        return input
+    @staticmethod
+    def backward(ctx, grad_output):
+        mag = int(math.log10(torch.abs(grad_output).mean().item()))
+        ctx.callback(f"10^{mag}", ctx.name)
+        return grad_output, None, None
+    
+class gradLessOp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, callback):
+        return callback(input)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, None
+class gradLessDivide(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, divider):
+        return input/divider
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, None
+class gradLessMultiply(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, multiplier):
+        return input*multiplier
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, None
+class gradLessPower(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, power):
+        return input**power
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, None
+    
+class GradMagnitudeLogger(nn.Module):
+    def __init__(self, name, callback=lambda norm,name: print(name+":", norm)):
+        super().__init__()
+        self.name = name
+        self.callback = callback
+    def forward(self, input):
+        return gradMagLog.apply(input, self.name, self.callback)
     
 class Pnorm(RegularizationModule):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, **kwargs)
         self.p = kwargs.get('p', 2)
+        # self.f = GradMagnitudeLogger("l"+str(self.p))
     def function(self, x):
+        # x = self.f(x)
         out = (torch.abs(x)**self.p).sum()
-        with torch.no_grad():
-            return out/x.numel()
+        out = gradLessDivide.apply(out, x.numel())
+        out = gradLessPower.apply(out, 1/self.p)
+        # with torch.no_grad():
+        #     out = out/x.numel()
+        return out
     
 class Pnorm_full(RegularizationModule):
     def __init__(self, coefficient=1, **kwargs):
@@ -84,18 +153,18 @@ class Pnorm_full(RegularizationModule):
     
 class l1(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
-        super().__init__(coefficient=coefficient, **kwargs)
-        self.p = 1
+        super().__init__(coefficient=coefficient, p=1, **kwargs)
 class l2(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
-        super().__init__(coefficient=coefficient, **kwargs)
-        self.p = 2
+        super().__init__(coefficient=coefficient, p=2, **kwargs)
         
 class l1NDNT(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, **kwargs)
         self.p = 1
+        # self.f = GradMagnitudeLogger("l1NDNT")
     def function(self, x):
+        # x = self.f(x)
         x = torch.abs(x)
         x = x.permute(*self.keepdims, *[i for i in range(len(x.shape)) if i not in self.keepdims])
         x = x.reshape(math.prod(self.keepdims), -1)
@@ -104,7 +173,9 @@ class l2NDNT(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, **kwargs)
         self.p = 2
+        # self.f = GradMagnitudeLogger("l2NDNT")
     def function(self, x):
+        # x = self.f(x)
         x = x**self.p
         x = x.permute(*self.keepdims, *[i for i in range(len(x.shape)) if i not in self.keepdims])
         x = x.reshape(math.prod(self.keepdims), -1)
@@ -112,7 +183,7 @@ class l2NDNT(Pnorm):
     
 class l4(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
-        super().__init__(coefficient=coefficient, **kwargs)
+        super().__init__(coefficient=coefficient, p=3, **kwargs)
         self.p = 3
         
 class l2_full(Pnorm_full):
@@ -121,56 +192,43 @@ class l2_full(Pnorm_full):
         self.p = 2
         
 class local(RegularizationModule):
-    def __init__(self, coefficient=1, shape=None, dims=None, is_global=False, **kwargs):
-        super().__init__(coefficient=coefficient, shape=shape, dims=dims, **kwargs)
+    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
+        super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
         assert self.shape is not None, 'Must specify expected shape of item to be penalized'
         self.dims = _verify_dims(self.shape, dims)
+        self.leftover_dims = [i for i in range(len(self.shape)) if i not in self.dims and i not in self.keepdims]
         self.norm = np.mean([self.shape[i] for i in self.dims])#np.prod([self.shape[i] for i in self.dims])**(1/len(self.dims))
         for ind in self.dims:
             i = self.shape[ind]
             v = ((torch.arange(i)-torch.arange(i)[:,None])**2).float()/i**2 # shape = (i,j)
-            # v = v/v.max(dim=0)[0]
             self.register_buffer(f'local_pen{ind}', v)
-        self.is_global = is_global
+        
+        # self.f = GradMagnitudeLogger("local")
 
     def function(self, x):
+        # x = self.f(x)
         w = x**2
-
+        w = w.permute(*self.dims, *self.leftover_dims, *self.keepdims)
+        w = w.reshape(
+            *[self.shape[i] for i in self.dims],
+            -1,
+            reduce(lambda x,y:x*y, [self.shape[i] for i in self.keepdims], 1),
+        ) # reshape to dims, -1, flattened keepdims
         pen = 0
-        for dim in self.dims:
-            # get the regularization matrix
+        for ind, dim in enumerate(self.dims):
             mat = getattr(self, f'local_pen{dim}') # shape = (i,j)
-            
-            # permute targeted dim to the end
-            w_permuted = w.permute(*[i for i in range(len(self.shape)) if i not in [dim]], *[dim])
-            
-            # reshape while keeping he channel dimension intact
-            w_permuted = w_permuted.reshape(self.shape[0], -1, *[self.shape[i] for i in [dim]])
-
-            w_permuted = w_permuted.mean(dim=1)
-
-            ## quadratic form: W^T M W
+            w_permuted_shape = list(range(len(w.shape))) # [*dims.shape, -1, prod(keepdims.shape)]
+            w_permuted_shape.remove(ind)
+            w_permuted = w.permute(w_permuted_shape+[ind])
+            w_permuted = w_permuted.sum(list(range(len(w_permuted.shape)-2)))
             temp = w_permuted @ mat
-            temp = (temp * w_permuted).sum(dim=1)
-            
-            with torch.no_grad():
-                temp = temp/mat.shape[0]
-            pen += temp
-            # # sum over all unpenalized dimensions
-            # if self.is_global:
-            #     w_permuted = w_permuted.sum(dim=1).unsqueeze(1)
-                
-            # quadratic form: W^T M W
-            # temp = torch.einsum('nci,ij->nj', w_permuted, mat)
-            # temp = torch.einsum('ni,nci->n', temp, w_permuted)
-            # pen = pen + temp
-        with torch.no_grad():
-            return pen/self.norm
+            temp = torch.einsum('nj,nj->n', temp, w_permuted)
+            pen = pen + gradLessDivide.apply(temp, mat.shape[0])
+        return gradLessDivide.apply(pen, self.norm)
 
 class glocal(local):
-    def __init__(self, coefficient=1, shape=None, dims=None, **kwargs):
-        super().__init__(coefficient=coefficient, shape=shape, dims=dims, is_global=True, **kwargs)
-        # print('glocal is the same as local')
+    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
+        super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
         
 class glocalNDNT(RegularizationModule):
     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
@@ -183,9 +241,10 @@ class glocalNDNT(RegularizationModule):
             i = self.shape[ind]
             v = ((torch.arange(i)-torch.arange(i)[:,None])**2).float()/i**2 # shape = (i,j)
             self.register_buffer(f'local_pen{ind}', v)
+        
+        # self.f = GradMagnitudeLogger("glocalNDNT")
     def function(self, x):
-        # 0, 1
-        # 80, 80, 65
+        # x = self.f(x)
         w = x**2
         w = w.permute(*self.dims, *self.leftover_dims, *self.keepdims)
         w = w.reshape(
@@ -204,17 +263,6 @@ class glocalNDNT(RegularizationModule):
             temp = torch.einsum('nj,nj->n', temp, w_permuted)
             pen = pen + temp
         return pen.mean()
-        # w = x**2
-        # pen = 0
-        # for dim in self.dims:
-        #     mat = getattr(self, f'local_pen{dim}')
-        #     w_permuted = w.permute(*[i for i in range(len(self.shape)) if i not in [dim]], *[dim])
-        #     w_permuted = w_permuted.reshape(self.shape[0], -1, *[self.shape[i] for i in [dim]])
-        #     w_permuted = w_permuted.mean(dim=1)
-        #     temp = w_permuted @ mat
-        #     temp = (temp * w_permuted).sum(dim=1)
-        #     pen = temp + pen
-        # return pen.mean()
         
 class edge(RegularizationModule):
     def __init__(self, coefficient=1, dims=None, **kwargs):
