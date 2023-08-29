@@ -44,7 +44,7 @@ class Grad():
     def __sub__(self, other):
         return Grad([g-other for g in self.grads])
 
-def plot_grid(mat, titles=None, vmin=None, vmax=None, **kwargs):
+def plot_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs):
     '''
         Plot a grid of figures such that each subfigure has m subplots.
         mat is a list of lists of image data (n, m, x, y)
@@ -55,7 +55,7 @@ def plot_grid(mat, titles=None, vmin=None, vmax=None, **kwargs):
     
     fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(2*m, 2*n))
     
-    for i in tqdm(range(n), desc='Grid plot'):
+    for i in tqdm(range(n), desc=desc):
         for j in range(m):
             axes[i, j].imshow(mat[i][j], vmin=vmin, vmax=vmax)
             axes[i, j].axis('off')
@@ -66,7 +66,7 @@ def plot_grid(mat, titles=None, vmin=None, vmax=None, **kwargs):
     for key in kwargs:
         eval(f'plt.{key}')(kwargs[key])
         
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     return fig
     
 def eval_gratings(model, device='cpu', alpha=1, shape=(35, 35, 24), fs=None):

@@ -15,7 +15,29 @@ from IPython.display import Video
 import imageio
 from _utils.utils import memory_clear
 import torch.nn as nn
+import torch.nn.functional as F
 import cv2
+
+class split_nonlinearity(nn.Module):
+    def __init__(self, f=nn.Softplus()):
+        super().__init__()
+        self.f = f
+    def forward(self, x):
+        return torch.cat([self.f(x), self.f(-x)], dim=1)
+    
+def pad_causal(x, layer, kdims=None):
+    """
+    Pad a tensor for a causal convolution.
+    x is a tensor
+    layer is a convolutional layer
+    kdims is the dimensions of the kernel that should be causal
+    """
+    kdims = kdims if kdims is not None else np.arange(len(layer.kernel_size))
+    kdims = [kdims] if type(kdims) is int else kdims
+    pad_array = []
+    for i in np.arange(len(layer.kernel_size))[::-1]:
+        pad_array += [layer.kernel_size[i]-1, 0] if i in kdims else [0, 0]
+    return F.pad(x, pad_array)
 
 def KaimingTensor(shape, out_dim=-1, *args, **kwargs):
     t = torch.empty(shape, *args, **kwargs)

@@ -18,10 +18,12 @@ class PytorchWrapper(ModelWrapper):
         self.bypass_preprocess = bypass_preprocess
         if not hasattr(self, 'cids'):
             self.cids = cids
+        self.reg = regularization.extract_reg(self.model)
     def compute_reg_loss(self, *args, **kwargs):
-        loss = 0
-        if hasattr(self.model, 'compute_reg_loss'):
-            loss = self.model.compute_reg_loss(*args, **kwargs)
+        # loss = 0
+        # if hasattr(self.model, 'compute_reg_loss'):
+        #     loss = self.model.compute_reg_loss(*args, **kwargs)
+        loss = sum([r() for r in self.reg]+[0])
         if type(loss) is int:
             return torch.tensor(loss, device=self.parameters().__next__().device).float()
         return loss
@@ -395,7 +397,7 @@ class CBlock3D(nn.Module):
         with torch.no_grad():
             device = self.c.weight.data.device
             w1, w2, w3 = [torch.hamming_window(self.c.weight.shape[i], periodic=False, device=device) for i in [-3, -2, -1]]
-            self.original_weights = self.c.weight.data.clone()
+            self.original_weights = self.c.weight.data
             self.c.weight.data = torch.einsum("i,j,k,noijk->noijk", w1, w2, w3, self.c.weight.data)
             self.window_on = True
     def unwindow(self):
@@ -499,11 +501,15 @@ class DenseReadoutC(nn.Module):
         )
     def forward(self, x):
         # print(x.shape)
+        # with torch.no_grad():
+        # self.feature.data = self.feature.data/self.feature.data.norm(dim=0, keepdim=True)
         return torch.einsum('tcxy,cn,xyn->tn',x,self.feature,self.space) + self.bias
     def compute_reg_loss(self):
         # regs = []
         # regs.append(self.freg(self.feature))
         # regs.append(self.sreg(self.space))
+        # with torch.no_grad():
+        # self.feature.data = self.feature.data/self.feature.data.norm(dim=0, keepdim=True)
         return self.reg()
 
 class ReadoutC(nn.Module):
@@ -539,6 +545,7 @@ class CNNC(nn.Module):
         super().__init__()
         print(input_dims[-1], "lags")
         # input_dims is (c, x, y, nlags)
+        nl = F.relu
         self.core = CoreC(input_dims[:3], nl, input_dims[-1], window=True)
         self.readout = DenseReadoutC([20, *input_dims[1:3]], ncids)
         # self.readout = DenseReadoutNDNT(input_dims=[20, *input_dims[1:3], 1],

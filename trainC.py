@@ -4,7 +4,7 @@
 #%%
 #!%load_ext autoreload
 #!%autoreload 2
-import os, traceback
+import os, traceback, shutil
 import numpy as np
 import json
 import torch
@@ -156,7 +156,15 @@ callbacks = [
 trainer_args = {
     "callbacks": [
         *(callbacks if config["trainer"] != "lbfgs" else []),
-        ModelCheckpoint(dirpath=dirs["checkpoint_dir"], filename='model', save_top_k=1, monitor="val_loss" if config["trainer"] != "lbfgs" else "train_loss", verbose=1, every_n_epochs=1),
+        ModelCheckpoint(
+            dirpath=dirs["checkpoint_dir"],
+            filename='model',
+            save_top_k=1,
+            monitor="val_loss" if config["trainer"] != "lbfgs" else "train_loss",
+            verbose=1,
+            every_n_epochs=1,
+            save_last=False
+        ),
     ],
     "accelerator": "cpu" if config["device"] == 'cpu' else "gpu",
     "logger": TensorBoardLogger(dirs["checkpoint_dir"], version=0),
@@ -173,8 +181,9 @@ try:
 except (RuntimeError, KeyboardInterrupt, ValueError) as e:
     error = str(traceback.format_exc())
     print(error)
-    print('Training failed. Saving model anyway (backing up previous model).')
-    backupPreviousModel(dirs)
+    if error != 'KeyboardInterrupt':
+        print('Training failed. Saving model anyway (backing up previous model).')
+        backupPreviousModel(dirs)
     
 #save metadata
 with open(dirs["config_path"], 'w') as f:
@@ -190,6 +199,9 @@ with open(dirs["config_path"], 'w') as f:
     f.write(json.dumps(to_write, indent=2))
 
 if not config["compile"]:
+    #copy model from trainer.checkpoint_callback.best_model_path to dirs["model_path"]
+    # shutil.copy(trainer.checkpoint_callback.best_model_path, dirs["model_path"])
+    
     with open(dirs["model_path"], 'wb') as f:
         dill.dump(PLWrapper.load_from_config_path(dirs["config_path"]), f)
         print('Model pickled.')

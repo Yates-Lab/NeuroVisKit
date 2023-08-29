@@ -7,6 +7,17 @@ import numpy as np
 from functools import reduce
 import math
 
+def extract_reg(module):
+    def get_reg_helper(module):
+        out_modules = []
+        for current_module in module.children():
+            if isinstance(current_module, nn.Module):
+                    out_modules += get_reg_helper(current_module)
+            elif isinstance(current_module, RegularizationModule):
+                    out_modules.append(current_module)
+        return out_modules
+    return get_reg_helper(module)
+
 def get_regs_dict():
     return {
         k:v for k,v in globals().items()
