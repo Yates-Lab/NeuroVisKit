@@ -3,7 +3,6 @@ import dill
 import NDNT
 from utils.trainer import train
 from models import ModelWrapper, CNNdense
-from utils.get_models import get_cnn
 from _utils.utils import seed_everything
 from dadaptation import DAdaptAdam, DAdaptSGD, DAdaptAdaGrad
 from dog import DoG, LDoG

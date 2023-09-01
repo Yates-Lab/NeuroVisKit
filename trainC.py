@@ -49,6 +49,7 @@ config_defaults = {
     'fast': False,
     'compile': False,
     'accumulate_batches': 1,
+    'custom_models_path': None,
 }
 
 # Here we make sure that the script can be run from the command line.
@@ -75,6 +76,7 @@ if not isInteractive():
         ('c', 'compile'),
         ('a:', 'accumulate_batches=', int),
         ('r:', 'lr=', float),
+        ('g:', 'custom_models_path='), # this is the path to the custom models file
     ], default=config_defaults)
     if config_defaults['from_checkpoint']:
         with open(joinCWD('data', 'models', config_defaults["name"], 'config.json'), 'r') as f:

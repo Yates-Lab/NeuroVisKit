@@ -33,6 +33,7 @@ config = {
     'name': 'cnnc',
     # 'pytorch': False,
     'fast': False,
+    'ignore_model_capitalization': False,
     # 'load_preprocessed': False,
 }
 
@@ -44,6 +45,7 @@ if not isInteractive():
         ('s:', 'session='),
         # ('p', 'pytorch'),
         ('f', 'fast'),
+        ('i', 'ignore_model_capitalization'),
         # ('l', 'load_preprocessed'),
     ], default=config)
 else:
@@ -63,7 +65,7 @@ with open(os.path.join(dirs["session_dir"], 'session.pkl'), 'rb') as f:
     session = dill.load(f)
 # with open(dirs["model_path"], 'rb') as f:
 #     model = dill.load(f)
-model = lutils.PLWrapper.load_from_config_path(dirs["config_path"]) #@TODO something is broken
+model = lutils.PLWrapper.load_from_config_path(dirs["config_path"], config["ignore_model_capitalization"]) #@TODO something is broken
 with open(dirs["config_path"], 'r') as f:
     train_config = json.load(f)
     

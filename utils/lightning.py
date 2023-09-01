@@ -1,17 +1,22 @@
 import os, dill, sys, shutil, json, io, contextlib
+from typing import Any, Callable, Optional, Union
+from lightning.pytorch.core.optimizer import LightningOptimizer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler, Dataset
 import lightning as pl
 from lightning.pytorch.callbacks import LearningRateFinder
 import math
 import numpy as np
-import utils.get_models as get_models
+import utils.models as models
 from utils.utils import to_device
 import moten
 import warnings
 import logging
+import importlib.util
+
 logging.getLogger("pytorch_lightning.utilities.rank_zero").addHandler(logging.NullHandler())
 torch.set_float32_matmul_precision("medium")
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
@@ -166,6 +171,13 @@ class PLWrapper(pl.LightningModule):
         del x
         return losses['loss']
     
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
+        out = super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
+        if hasattr(self.wrapped_model, 'compute_proximal_reg_loss'):
+            preg_loss = self.wrapped_model.compute_proximal_reg_loss()
+            self.log("proximal_reg_loss", preg_loss, prog_bar=True, on_step=True)
+        return out
+    
     def validation_step(self, x, batch_idx=0, dataloader_idx=0):
         x = self.preprocess_data(x)
         losses = self.wrapped_model.validation_step(x)
@@ -190,7 +202,7 @@ class PLWrapper(pl.LightningModule):
         self.wrapped_model.loss = loss
     
     @staticmethod
-    def load_from_config_path(config_path):
+    def load_from_config_path(config_path, ignore_model_capitalization=False):
         with open(config_path, 'rb') as f:
             config = json.load(f)
         if config["checkpoint_path"][-3:] == "pkl":
@@ -198,7 +210,13 @@ class PLWrapper(pl.LightningModule):
                 return dill.load(f)
         with open(config["checkpoint_path"], 'rb') as f:
             cp = torch.load(f)
-        plmodel = PLWrapper(wrapped_model=get_models.get_model(config), preprocess_data=PreprocessFunction(config["dynamic_preprocess"]), **cp["hyper_parameters"]) 
+        if "custom_models_path" in config and config["custom_models_path"] is not None:
+            module = import_module_by_path(config["custom_models_path"], "custom_models")
+        else:
+            module = models
+        modelname = config["model"] if not ignore_model_capitalization else config["model"].upper()
+        model = get_module_dict(module, all_caps=ignore_model_capitalization)[modelname].fromConfig(config)
+        plmodel = PLWrapper(wrapped_model=model, preprocess_data=PreprocessFunction(config["dynamic_preprocess"]), **cp["hyper_parameters"]) 
         plmodel.load_state_dict(cp["state_dict"])
         return plmodel
     # @property
@@ -215,13 +233,18 @@ OPTIM_DICT = {
     "adam": torch.optim.Adam,
     "lbfgs": torch.optim.LBFGS,
 }
-
+    
 def get_model(config):
     lr = config["lr"] if "lr" in config.keys() else 3e-4
     lr = lr if config["trainer"] != "lbfgs" else 1
     optimizer = OPTIM_DICT[config["trainer"]]
     preprocess = PreprocessFunction(config["dynamic_preprocess"])
-    return PLWrapper(get_models.get_model(config), lr=lr, optimizer=optimizer, preprocess_data=preprocess)
+    if "custom_models_path" in config and config["custom_models_path"] is not None:
+        module = import_module_by_path(config["custom_models_path"], "custom_models")
+    else:
+        module = models
+    model = get_module_dict(module)[config["model"]].fromConfig(config)
+    return PLWrapper(model, lr=lr, optimizer=optimizer, preprocess_data=preprocess)
 
 def sum_dict_list(dlist):
     dsum = {d: [] for d in dlist[0].keys()}
@@ -289,7 +312,18 @@ def defrost_core(model, config):
     if config['defrost']:
         for i in model.model.core.parameters():
             i.requires_grad = True
-            
+
+def import_module_by_path(module_path, module_name="custom_models"):
+   spec = importlib.util.spec_from_file_location(module_name, module_path)
+   custom_module = importlib.util.module_from_spec(spec)
+   spec.loader.exec_module(custom_module)
+   return custom_module
+
+def get_module_dict(module, all_caps=False):
+    return {
+        (k if not all_caps else k.upper()):v for k,v in module.__dict__.items() if hasattr(v, 'fromConfig')
+    }
+    
 def prepare_model(config, dirs):
     if config["from_checkpoint"]:
         try:
