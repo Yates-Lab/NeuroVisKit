@@ -20,7 +20,7 @@ from models.utils.plotting import plot_sta_movie
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
-from datasets.mitchell.pixel.fixation import FixationMultiDataset
+from pixel.fixation import FixationMultiDataset
 from matplotlib.animation import FuncAnimation
 from utils.mei import irfC
 import matplotlib.animation as animation

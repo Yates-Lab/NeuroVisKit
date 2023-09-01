@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import torch
 import dill
 from copy import deepcopy
-from datasets.mitchell.pixel import Pixel
-from datasets.mitchell.pixel.utils import get_stim_list, plot_shifter
+from pixel import Pixel
+from pixel.utils import get_stim_list, plot_shifter
 from models.utils import plot_stas, eval_model
 from models import CNNdense, Shifter
 from NDNT.utils import get_max_samples, load_model

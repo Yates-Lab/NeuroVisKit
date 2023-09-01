@@ -175,7 +175,7 @@ class PLWrapper(pl.LightningModule):
         out = super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
         if hasattr(self.wrapped_model, 'compute_proximal_reg_loss'):
             preg_loss = self.wrapped_model.compute_proximal_reg_loss()
-            self.log("proximal_reg_loss", preg_loss, prog_bar=True, on_step=True)
+            self.log("proximal_reg_loss", float(preg_loss), prog_bar=True, on_step=True)
         return out
     
     def validation_step(self, x, batch_idx=0, dataloader_idx=0):

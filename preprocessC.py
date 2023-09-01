@@ -12,8 +12,8 @@ import matplotlib.pyplot as plt
 import torch
 import dill
 from copy import deepcopy
-from datasets.mitchell.pixel import Pixel, FixationMultiDataset
-from datasets.mitchell.pixel.utils import get_stim_list, plot_shifter
+from pixel import Pixel, FixationMultiDataset
+from pixel.utils import get_stim_list, plot_shifter
 from models.utils import plot_stas, eval_model
 from models import CNNdense, Shifter
 from NDNT.utils import get_max_samples, load_model
@@ -48,7 +48,7 @@ datadir = [
     '/mnt/Data/Datasets/MitchellV1FreeViewing/stim_movies/'
     ][0]
 spike_sorting = 'kilo'
-num_lags = 36
+num_lags = 24
 
 if __name__ == "__main__" and not hasattr(__main__, 'get_ipython'):
     argv = sys.argv[1:]

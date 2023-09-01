@@ -12,7 +12,7 @@ import dill
 from _utils.utils import seed_everything, joinCWD
 from utils.loss import get_loss
 from utils.train import InMemoryContiguousDataset3
-from datasets.mitchell.pixel import FixationMultiDataset
+from pixel import FixationMultiDataset
 import torch.nn.functional as F
 import torch.nn as nn
 import lightning as pl
