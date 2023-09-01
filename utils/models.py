@@ -3,15 +3,85 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from models import ModelWrapper
-from models import CNNdense as CNNdenseNDNT
+# from models import ModelWrapper
+# from models import CNNdense as CNNdenseNDNT
 from utils import regularization
 from utils import utils
+from utils.loss import Poisson
 # from unet import UNet, BioV
 import math
 from tqdm import tqdm
 import moten
-from models.cnns import DenseReadout as DenseReadoutNDNT
+# from models.cnns import DenseReadout as DenseReadoutNDNT
+
+class ModelWrapper(nn.Module):
+    '''
+    Instead of inheriting the Encoder class, wrap models with a class that can be used for training
+    '''
+
+    def __init__(self,
+            model, # the model to be trained
+            loss=Poisson(), # the loss function to use
+            cids = None, # which units to use during fitting
+            **kwargs,
+            ):
+        
+        super().__init__()
+        
+        if cids is None:
+            self.cids = model.cids
+        else:
+            self.cids = cids
+        
+        self.model = model
+        if hasattr(model, 'name'):
+            self.name = model.name
+        else:
+            self.name = 'unnamed'
+
+        self.loss = loss
+
+    
+    def compute_reg_loss(self):
+        
+        return self.model.compute_reg_loss()
+
+    def prepare_regularization(self, normalize_reg = False):
+        
+        self.model.prepare_regularization(normalize_reg=normalize_reg)
+    
+    def forward(self, batch):
+
+        return self.model(batch)
+
+    def training_step(self, batch, batch_idx=None):  # batch_indx not used, right?
+        
+        y = batch['robs'][:,self.cids]
+        y_hat = self(batch)
+
+        if 'dfs' in batch.keys():
+            dfs = batch['dfs'][:,self.cids]
+            loss = self.loss(y_hat, y, dfs)
+        else:
+            loss = self.loss(y_hat, y)
+
+        regularizers = self.compute_reg_loss()
+
+        return {'loss': loss + regularizers, 'train_loss': loss, 'reg_loss': regularizers}
+
+    def validation_step(self, batch, batch_idx=None):
+        
+        y = batch['robs'][:,self.cids]
+        
+        y_hat = self(batch)
+
+        if 'dfs' in batch.keys():
+            dfs = batch['dfs'][:,self.cids]
+            loss = self.loss(y_hat, y, dfs)
+        else:
+            loss = self.loss(y_hat, y)
+
+        return {'loss': loss, 'val_loss': loss, 'reg_loss': None}
 
 class PytorchWrapper(ModelWrapper):
     def __init__(self, model, *args, cids=None, bypass_preprocess=False, **kwargs):
@@ -231,41 +301,41 @@ class CNN_time_embed(nn.Module):
             cids=config['cids']
         )
 
-class CNNdense(nn.Module):
-    def __init__(self, input_dims, cids, nl=F.softplus, output_nl=F.softplus):
-        super().__init__()
-        num_filters = [20, 20, 20, 20]
-        filter_width = [11, 11, 11, 11]
-        scaffold = [len(num_filters)-1]
-        num_inh = [0]*len(num_filters)
-        modifiers = None
-        self.model = CNNdenseNDNT(
-            input_dims,
-            num_filters,
-            filter_width,
-            scaffold,
-            num_inh,
-            is_temporal=False,
-            NLtype='softplus',
-            batch_norm=True,
-            norm_type=0,
-            noise_sigma=0,
-            NC=len(cids),
-            bias=False,
-            reg_core=None,
-            reg_hidden=None,
-            reg_readout={'glocalx':.1, 'l2':0.1},
-            reg_vals_feat={'l1':0.01},
-            cids=cids,
-            modifiers=modifiers,
-            window='hamming')
-    def fromConfig(config):
-        model = CNNdense(
-            config['input_dims'],
-            config['cids']
-        ).model
-        model.prepare_regularization()
-        return ModelWrapper(model)
+# class CNNdense(nn.Module):
+#     def __init__(self, input_dims, cids, nl=F.softplus, output_nl=F.softplus):
+#         super().__init__()
+#         num_filters = [20, 20, 20, 20]
+#         filter_width = [11, 11, 11, 11]
+#         scaffold = [len(num_filters)-1]
+#         num_inh = [0]*len(num_filters)
+#         modifiers = None
+#         self.model = CNNdenseNDNT(
+#             input_dims,
+#             num_filters,
+#             filter_width,
+#             scaffold,
+#             num_inh,
+#             is_temporal=False,
+#             NLtype='softplus',
+#             batch_norm=True,
+#             norm_type=0,
+#             noise_sigma=0,
+#             NC=len(cids),
+#             bias=False,
+#             reg_core=None,
+#             reg_hidden=None,
+#             reg_readout={'glocalx':.1, 'l2':0.1},
+#             reg_vals_feat={'l1':0.01},
+#             cids=cids,
+#             modifiers=modifiers,
+#             window='hamming')
+#     def fromConfig(config):
+#         model = CNNdense(
+#             config['input_dims'],
+#             config['cids']
+#         ).model
+#         model.prepare_regularization()
+#         return ModelWrapper(model)
 
 # MODEL_DICT = {
 #     'CNNdense': get_cnn,

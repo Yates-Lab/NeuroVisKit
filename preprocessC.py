@@ -14,20 +14,18 @@ import dill
 from copy import deepcopy
 from pixel import Pixel, FixationMultiDataset
 from pixel.utils import get_stim_list, plot_shifter
-from models.utils import plot_stas, eval_model
-from models import CNNdense, Shifter
-from NDNT.utils import get_max_samples, load_model
-from NDNT.training import Trainer, EarlyStopping
-from utils.utils import initialize_gaussian_envelope, get_datasets, plot_transients
+from utils.plotting import plot_stas
+# from NDNT.utils import get_max_samples, load_model
+# from NDNT.training import Trainer, EarlyStopping
+# from utils.utils import initialize_gaussian_envelope, get_datasets, plot_transients
 from _utils.utils import seed_everything
 import utils.preprocess as utils
 from matplotlib.backends.backend_pdf import PdfPages
 import continuous as C
 from utils.utils import memory_clear
-from models import Shifter, ModelWrapper
 from copy import deepcopy
-from NDNT.training import Trainer, EarlyStopping
-from NDNT.utils import load_model
+# from NDNT.training import Trainer, EarlyStopping
+# from NDNT.utils import load_model
 from utils.utils import initialize_gaussian_envelope
 from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler
 from random import shuffle

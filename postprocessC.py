@@ -16,7 +16,8 @@ from utils.utils import plot_transientsC, TimeLogger, to_device
 from _utils.utils import isInteractive, get_opt_dict, seed_everything, joinCWD
 import utils.postprocess as utils
 import utils.lightning as lutils
-from models.utils.plotting import plot_sta_movie
+from utils.plotting import plot_sta_movie
+import utils.loss as loss
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
@@ -85,7 +86,7 @@ val_inds = ds.block_inds_to_fix_inds(session["val_inds"])
 val_dl = lutils.get_fix_dataloader(ds, val_inds, batch_size=1)
 #%% 
 # Evaluate model
-model.loss = NDNT.metrics.poisson_loss.PoissonLoss_datafilter()
+model.loss = loss.Poisson()
 ev = utils.eval_model_summary(model, val_dl)
 best_cids = ev.argsort()[::-1]
 logger.log('Evaluated model.')

@@ -1,5 +1,4 @@
 import torch
-import NDNT
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -268,6 +267,10 @@ class ExperimentalNDNTLossWrapper(nn.Module):
                 unitloss = torch.sum( torch.mul(loss_full, data_filters), axis=0 )
         return unitloss
         # END PoissonLoss_datafilter.unit_loss
+        
+class Poisson(NDNTLossWrapper):
+    def __init__(self):
+        super().__init__(poisson_f, "poisson")
     
 LOSS_DICT = {
     'mse': NDNTLossWrapper(mse_f, "mse"),
