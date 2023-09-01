@@ -665,7 +665,7 @@ class FixationMultiDataset(Dataset):
             sfname = [f for f in os.listdir(self.dirname) if 'shifter_' + sess in f]
                 
             if len(sfname) == 0:
-                from pixel.utils import download_shifter
+                from utils.datasets.utils import download_shifter
                 download_shifter(self.sess_list[0], self.dirname)
             else:
                 print("Shifter exists")

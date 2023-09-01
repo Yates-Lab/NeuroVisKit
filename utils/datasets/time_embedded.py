@@ -402,7 +402,7 @@ class Pixel(Dataset):
             sfname = [f for f in os.listdir(self.dirname) if 'shifter_' + sess in f]
                 
             if len(sfname) == 0:
-                from pixel.utils import download_shifter
+                from utils.datasets.utils import download_shifter
                 download_shifter(sess, self.dirname)
                 
             import pickle
@@ -417,7 +417,7 @@ class Pixel(Dataset):
                 shifterinfo = {'shifter': shifter}
 
             if plot:
-                from pixel.utils import plot_shifter
+                from utils.datasets.utils import plot_shifter
                 _ = plot_shifter(shifter, title=sess)
             
             shifters[sess] = shifterinfo

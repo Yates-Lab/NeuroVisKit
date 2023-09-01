@@ -5,7 +5,7 @@ import numpy as np
 import h5py
 from tqdm import tqdm
 import os
-from datasets.utils import ensure_dir, reporthook, downsample_time
+from .utils import ensure_dir, reporthook, downsample_time
 from .utils import get_stim_list, download_set
 
 class PixelDataset(Dataset):

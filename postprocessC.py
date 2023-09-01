@@ -21,7 +21,7 @@ import utils.loss as loss
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
-from pixel.fixation import FixationMultiDataset
+from utils.datasets.fixation import FixationMultiDataset
 from matplotlib.animation import FuncAnimation
 from utils.mei import irfC
 import matplotlib.animation as animation

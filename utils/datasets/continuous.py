@@ -4,6 +4,70 @@ import numpy as np
 import h5py
 import os
 from .utils import get_stim_list, download_set, firingrate_datafilter, shift_im
+import matplotlib.pyplot as plt
+
+def check_spikes_per_batch(ds):
+    nspikes = []
+    print("counting spikes in each fixation")
+    for ifix in tqdm(range(len(ds))):
+        batch = ds[ifix]
+        nspikes.append(batch['robs'].mean().item())
+
+    plt.plot(np.stack(nspikes), '.')
+    plt.ylim(0, 1)
+    if ds.use_blocks:
+        plt.xlabel('block number')
+    else:
+        plt.xlabel('fixation number')
+
+    plt.ylabel('proportion of bins with spikes')
+
+    sus_fix = np.where(np.stack(nspikes)>.2)[0]
+    if len(sus_fix)==0:
+        print('no fixations with bad spikes')
+        sus_fix = np.arange(len(ds))
+
+    return nspikes, sus_fix
+
+def check_raw_sta(ds, lag=7, stim_id=1):
+    Stim = ds.fhandles[0][ds.requested_stims[stim_id]][ds.stimset]['Stim'][:,:,:].astype(np.float32)
+    Stim = torch.from_numpy(Stim)
+    frame_times = ds.fhandles[0][ds.requested_stims[stim_id]][ds.stimset]['frameTimesOe'][0,:]
+    labels = ds.fhandles[0][ds.requested_stims[stim_id]][ds.stimset]['labels'][0,:]
+
+    # get spike times
+    st = ds.fhandles[0]['Neurons'][ds.spike_sorting]['times'][0,:]
+    clu = ds.fhandles[0]['Neurons'][ds.spike_sorting]['cluster'][0,:].astype(int)
+
+    # plt.figure(figsize=(10,5))
+    # plt.plot(st, clu, 'k|', ms=.1)
+    # plt.plot(frame_times, labels, 'r')
+
+    bin_size = 8e-3
+    ind1 = np.digitize(st, frame_times)
+    ind2 = np.digitize(st, frame_times+bin_size)
+
+    ix = ind2-ind1 != 0
+    # ix = np.logical_and(ix, ind2+1 == ind1)
+    # ix = np.logical_and(ix,clu>0)
+
+    robs = torch.sparse_coo_tensor( np.asarray([ind1[ix]-1, clu[ix]-1]),
+            np.ones(len(clu[ix])), (len(frame_times), np.max(clu)) , dtype=torch.float32)
+    robs = robs.to_dense()
+    robs = robs[:,robs.sum(dim=0)>0]
+    NC = robs.shape[1]
+    # inds = np.where(np.logical_and(labels==1, np.arange(robs.shape[0])>lag))[0]
+    inds = np.where(np.arange(robs.shape[0])>lag)[0]
+    sta = torch.einsum('hwt, tn->hwn', Stim[:,:,inds-lag], robs[inds,:]-robs[inds,:].mean(dim=0))
+
+    plt.figure(figsize=(10,10))
+    sx = int(np.ceil(np.sqrt(NC)))
+    sy = int(np.ceil(NC/sx))
+    for cc in range(NC):
+        plt.subplot(sx,sy,cc+1)
+        plt.imshow(sta[:,:,cc])
+
+    return sta
 
 class Pixel(Dataset):
     '''
@@ -402,7 +466,7 @@ class Pixel(Dataset):
             sfname = [f for f in os.listdir(self.dirname) if 'shifter_' + sess in f]
                 
             if len(sfname) == 0:
-                from pixel.utils import download_shifter
+                from utils.datasets.utils import download_shifter
                 download_shifter(sess, self.dirname)
                 
             import pickle
@@ -417,7 +481,7 @@ class Pixel(Dataset):
                 shifterinfo = {'shifter': shifter}
 
             if plot:
-                from pixel.utils import plot_shifter
+                from utils.datasets.utils import plot_shifter
                 _ = plot_shifter(shifter, title=sess)
             
             shifters[sess] = shifterinfo

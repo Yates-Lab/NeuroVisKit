@@ -8,7 +8,7 @@ import torch
 import dill
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from pixel.generic import GenericDataset
+from utils.datasets.generic import GenericDataset
 from tqdm import tqdm
 from functools import reduce
 from IPython.display import Video

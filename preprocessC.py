@@ -12,8 +12,8 @@ import matplotlib.pyplot as plt
 import torch
 import dill
 from copy import deepcopy
-from pixel import Pixel, FixationMultiDataset
-from pixel.utils import get_stim_list, plot_shifter
+from utils.datasets import Pixel, FixationMultiDataset
+from utils.datasets.utils import get_stim_list, plot_shifter
 from utils.plotting import plot_stas
 # from NDNT.utils import get_max_samples, load_model
 # from NDNT.training import Trainer, EarlyStopping
@@ -21,7 +21,7 @@ from utils.plotting import plot_stas
 from _utils.utils import seed_everything
 import utils.preprocess as utils
 from matplotlib.backends.backend_pdf import PdfPages
-import continuous as C
+import utils.datasets.continuous as C
 from utils.utils import memory_clear
 from copy import deepcopy
 # from NDNT.training import Trainer, EarlyStopping
