@@ -15,10 +15,10 @@ if __name__ == "__main__":
             'NeuroVisKit._utils',
         ],
         package_dir={
-            'NeuroVisKit': 'NeuroVisKit',
+            'NeuroVisKit': '.',
             'NeuroVisKit.tests': 'tests',
-            'NeuroVisKit.utils': 'NeuroVisKit/utils',
-            'NeuroVisKit._utils': 'NeuroVisKit/_utils',
+            'NeuroVisKit.utils': 'utils',
+            'NeuroVisKit._utils': '_utils',
         },
         # package_data={
         #     'NeuroVisKit': ['*'],
