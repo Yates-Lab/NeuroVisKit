@@ -8,15 +8,15 @@ import torch
 import dill
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from utils.datasets.generic import GenericDataset
+from ..utils.datasets.generic import GenericDataset
 from tqdm import tqdm
 from functools import reduce
 from IPython.display import Video
 import imageio
-from _utils.utils import memory_clear
+from .._utils.utils import memory_clear
 import torch.nn as nn
 import torch.nn.functional as F
-import cv2
+# import cv2
 
 class split_nonlinearity(nn.Module):
     def __init__(self, f=nn.Softplus()):
