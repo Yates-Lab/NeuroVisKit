@@ -5,6 +5,7 @@ import h5py
 import os
 from .utils import get_stim_list, download_set, firingrate_datafilter, shift_im
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 def check_spikes_per_batch(ds):
     nspikes = []

@@ -1,8 +1,8 @@
 import torch
 import dill
-from utils.trainer import train
+from NeuroVisKit.utils.trainer import train
 # from models import ModelWrapper, CNNdense
-from _utils.utils import seed_everything
+from NeuroVisKit._utils.utils import seed_everything
 from dadaptation import DAdaptAdam, DAdaptSGD, DAdaptAdaGrad
 from dog import DoG, LDoG
 import torch.nn as nn
@@ -87,11 +87,12 @@ class InMemoryContiguousDataset2(torch.utils.data.Dataset):
             
 class InMemoryContiguousDataset3(TensorDataset):
     def __init__(self, ds, inds=None):
-        self.inds = inds or list(range(len(ds)))
+        self.inds = inds if inds is not None else list(range(len(ds)))
         self.block = []
         dictionary = self.build_dataset(ds)
         self.keys = list(dictionary.keys())
         super().__init__(*dictionary.values())
+        print(len(self.block), len(self.inds))
     def preload(self, device):
         self.tensors = [t.to(device) for t in self.tensors]
     def __getitem__(self, index):

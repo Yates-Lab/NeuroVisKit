@@ -8,22 +8,22 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import json
-import NDNT
 import numpy as np
 import dill
 import os
-from utils.utils import plot_transientsC, TimeLogger, to_device
-from _utils.utils import isInteractive, get_opt_dict, seed_everything, joinCWD
-import utils.postprocess as utils
-import utils.lightning as lutils
-from utils.plotting import plot_sta_movie
-import utils.loss as loss
+from NeuroVisKit.utils.utils import plot_transientsC, TimeLogger, to_device
+from NeuroVisKit._utils.utils import isInteractive, get_opt_dict, seed_everything, joinCWD
+from NeuroVisKit._utils.lightning import get_dirnames
+import NeuroVisKit.utils.postprocess as utils
+import NeuroVisKit.utils.lightning as lutils
+from NeuroVisKit.utils.plotting import plot_sta_movie
+import NeuroVisKit.utils.loss as loss
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
-from utils.datasets.fixation import FixationMultiDataset
+from NeuroVisKit.utils.datasets.fixation import FixationMultiDataset
 from matplotlib.animation import FuncAnimation
-from utils.mei import irfC
+from NeuroVisKit.utils.mei import irfC
 import matplotlib.animation as animation
 #%%
 seed_everything(0)
@@ -35,6 +35,7 @@ config = {
     # 'pytorch': False,
     'fast': False,
     'ignore_model_capitalization': False,
+    'test': False,
     # 'load_preprocessed': False,
 }
 
@@ -47,6 +48,7 @@ if not isInteractive():
         # ('p', 'pytorch'),
         ('f', 'fast'),
         ('i', 'ignore_model_capitalization'),
+        ('q', 'test'),
         # ('l', 'load_preprocessed'),
     ], default=config)
 else:
@@ -57,7 +59,7 @@ else:
 device = config['device']
 print("using device", str(device))
 config["dirname"] = joinCWD('data')
-dirs = lutils.get_dirnames(config)
+dirs = get_dirnames(config)
 tosave_path = os.path.join(dirs['checkpoint_dir'], 'postprocess')
 logger = TimeLogger()
 #%%
@@ -83,7 +85,7 @@ logger.log('Loaded model.')
 ds = FixationMultiDataset.load(dirs["ds_dir"])
 ds.use_blocks = False
 val_inds = ds.block_inds_to_fix_inds(session["val_inds"])
-val_dl = lutils.get_fix_dataloader(ds, val_inds, batch_size=1)
+val_dl = lutils.get_fix_dataloader(ds, val_inds if not config["test"] else list(np.arange(10)), batch_size=1)
 #%% 
 # Evaluate model
 model.loss = loss.Poisson()
@@ -191,10 +193,11 @@ if not config["fast"]:
     slice_ind = 20 # column index to plot
     ncids = 3 # number of neurons to plot (sorted by bits per spike)
     assert len(val_inds) > offset + nfixations, "hit end of dataset when animating IRFs"
-    irf_dl = lutils.get_fix_dataloader(ds, val_inds[offset:offset+nfixations], batch_size=1)
-    val_data_slice = ds[val_inds[offset:offset+nfixations]]
+    inds = val_inds[offset:offset+nfixations] if not config["test"] else list(np.arange(1))
+    irf_dl = lutils.get_fix_dataloader(ds, inds, batch_size=1)
+    val_data_slice = ds[inds]
     stims, robs, dfs = val_data_slice["stim"], val_data_slice["robs"], val_data_slice["dfs"]
-    fixation_ind = [ind for ind in val_inds[offset:offset+nfixations] for _ in range(len(ds[ind]["robs"]))]
+    fixation_ind = [ind for ind in inds for _ in range(len(ds[ind]["robs"]))]
     is_saccade = [False] + (np.diff(fixation_ind) != 0).tolist()
     movie_cid_list = list(best_cids[:ncids])
     cc_originals = [cids[cc] for cc in movie_cid_list]

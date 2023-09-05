@@ -8,3 +8,6 @@ data/*
 *.pdf
 *.png
 checkpoints/*
+*.egg-info/*
+build/*
+data/*

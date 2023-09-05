@@ -12,21 +12,21 @@ import matplotlib.pyplot as plt
 import torch
 import dill
 from copy import deepcopy
-from utils.datasets import Pixel, FixationMultiDataset
-from utils.datasets.utils import get_stim_list, plot_shifter
-from utils.plotting import plot_stas
+from NeuroVisKit.utils.datasets import Pixel, FixationMultiDataset
+from NeuroVisKit.utils.datasets.utils import get_stim_list, plot_shifter
+from NeuroVisKit.utils.plotting import plot_stas
 # from NDNT.utils import get_max_samples, load_model
 # from NDNT.training import Trainer, EarlyStopping
 # from utils.utils import initialize_gaussian_envelope, get_datasets, plot_transients
-from _utils.utils import seed_everything
-import utils.preprocess as utils
+from NeuroVisKit._utils.utils import seed_everything
+import NeuroVisKit.utils.preprocess as utils
 from matplotlib.backends.backend_pdf import PdfPages
-import utils.datasets.continuous as C
-from utils.utils import memory_clear
+import NeuroVisKit.utils.datasets.continuous as C
+from NeuroVisKit.utils.utils import memory_clear
 from copy import deepcopy
 # from NDNT.training import Trainer, EarlyStopping
 # from NDNT.utils import load_model
-from utils.utils import initialize_gaussian_envelope
+from NeuroVisKit.utils.utils import initialize_gaussian_envelope
 from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler
 from random import shuffle
 from tqdm import tqdm

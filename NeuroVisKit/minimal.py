@@ -4,14 +4,14 @@
 #%%
 #!%load_ext autoreload
 #!%autoreload 2
-from _utils.utils import seed_everything
+from NeuroVisKit._utils.utils import seed_everything
 import torch.nn.functional as F
 import torch.nn as nn
 import lightning as pl
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-import utils.lightning as utils
-from utils.models import PytorchWrapper
+import NeuroVisKit.utils.lightning as utils
+from NeuroVisKit.utils.models import PytorchWrapper
 #%%
 seed_everything(0)
 device = 'cpu' # should be '0,' or '1,' or '0,1,' or 'cpu'

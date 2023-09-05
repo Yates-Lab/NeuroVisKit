@@ -5,6 +5,7 @@ from torch.nn.modules.utils import _reverse_repeat_tuple
 from torch.nn import functional as F
 import numpy as np
 from functools import reduce
+import inspect
 import math
 
 def extract_reg(module, proximal=False):
@@ -21,8 +22,7 @@ def extract_reg(module, proximal=False):
 def get_regs_dict():
     return {
         k:v for k,v in globals().items()
-        if isinstance(v, type)
-            and issubclass(v, RegularizationModule)
+        if inspect.isclass(v) and issubclass(v, RegularizationModule)
             and k[0] != k[0].upper() # exclude classes that start with uppercase
     }
 
@@ -84,7 +84,7 @@ class ProximalRegularization(Regularization):
 class RegularizationModule(Regularization):
     def __init__(self, coefficient=1, shape=None, dims=None, target=None, keepdims=None, **kwargs):
         super().__init__()
-
+        assert target is not None, 'Please set a target object for regularization module.'
         if isinstance(dims, int):
             dims = [dims]
         
