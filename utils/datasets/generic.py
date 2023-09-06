@@ -45,11 +45,11 @@ class ContiguousDataset(GenericDataset):
         
         super().__init__(data)
 
-        self.blocks = blocks
+        self.block = blocks
     
     def __len__(self):
 
-        return len(self.blocks)
+        return len(self.block)
 
     def __getitem__(self, index):
 
