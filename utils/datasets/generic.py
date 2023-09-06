@@ -3,6 +3,7 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 import tqdm
+import NeuroVisKit.utils.utils as utils
 
 class GenericDataset(Dataset):
     '''
@@ -10,39 +11,25 @@ class GenericDataset(Dataset):
     
     Inputs:
         Data: Dictionary of tensors. Each key will be a covariate for the dataset.
-        device: Device to put each tensor on. Default is cpu.
     '''
     def __init__(self,
-        data,
-        dtype=torch.float32,
-        device=None):
+        data):
 
-        self.covariates = {}
-        for cov in list(data.keys()):
-            self.covariates[cov] = data[cov].to(dtype)
+        self.covariates = data
+        self.requested_covariates = list(self.covariates.keys())
 
-        if device is None:
-            device = torch.device('cpu')
-        
-        self.device = device
-        
-        try:
-            if 'stim' in self.covariates.keys() and len(self.covariates['stim'].shape) > 3:
-                self.covariates['stim'] = self.covariates['stim'].contiguous(memory_format=torch.channels_last)
-        except:
-            pass
-
-        self.cov_list = list(self.covariates.keys())
-        for cov in self.cov_list:
-            self.covariates[cov] = self.covariates[cov].to(self.device)
+    def to(self, device):
+        self.covariates = utils.to_device(self.covariates, device)
+        return self
         
     def __len__(self):
 
         return self.covariates['stim'].shape[0]
 
     def __getitem__(self, index):
-        return {cov: self.covariates[cov][index,...] for cov in self.cov_list}
+        return {cov: self.covariates[cov][index,...] for cov in self.requested_covariates}
 
+# TODO: Blocked dataloader
 
 class ContiguousDataset(GenericDataset):
     '''
@@ -51,12 +38,12 @@ class ContiguousDataset(GenericDataset):
     
     Inputs:
         Data: Dictionary of tensors. Each key will be a covariate for the dataset.
-        device: Device to put each tensor on. Default is cpu.
+        Blocks: List of tuples. Each tuple is a start and stop index for a block of contiguous data.
     '''
 
-    def __init__(self, data, blocks, dtype=torch.float32, device=None):
+    def __init__(self, data, blocks):
         
-        super().__init__(data, dtype, device)
+        super().__init__(data)
 
         self.blocks = blocks
     
@@ -66,20 +53,26 @@ class ContiguousDataset(GenericDataset):
 
     def __getitem__(self, index):
 
-        if isinstance(index, int) or isinstance(index, np.int64):
-            index = [index]
-        elif isinstance(index, slice):
-            index = np.arange(index.start or 0, index.stop or len(self.blocks), index.step or 1)
+        if type(index) is int:
+            relevant_blocks = [self.block[index]]
+        elif type(index) is list:
+            relevant_blocks = [self.block[i] for i in index]
+        else:
+            # takes care of slices
+            relevant_blocks = self.block[index]
 
-        inds = []
-        for i in index:
-            inds.append(torch.arange(self.blocks[i][0], self.blocks[i][1])) #, device=self.device
-        
-        inds = torch.cat(inds)
+        # unravels starts and stops for each block
+        inds = [i for block in relevant_blocks for i in range(*block)]
 
-        return {cov: self.covariates[cov][inds,...] for cov in self.cov_list}
+        # calling the super class returns a dictionary of tensors
+        return super().__getitem__(inds)
     
-    def fromDataset(ds, dtype=torch.float32, device=None):
+    @staticmethod
+    def fromDataset(ds, inds=None):
+
+        if inds is None:
+            inds = list(range(len(ds)))
+
         blocks = []
         stim = []
         robs = []
@@ -87,7 +80,7 @@ class ContiguousDataset(GenericDataset):
         dfs = []
         bstart = 0
         print("building dataset")
-        for ii in tqdm(range(len(ds))):
+        for ii in tqdm(inds):
             batch = ds[ii]
             stim.append(batch['stim'])
             robs.append(batch['robs'])
@@ -106,5 +99,5 @@ class ContiguousDataset(GenericDataset):
             "eyepos": eyepos,
             "dfs": dfs,
         }
-        return ContiguousDataset(d, blocks, dtype=dtype, device=device)
+        return ContiguousDataset(d, blocks)
         
