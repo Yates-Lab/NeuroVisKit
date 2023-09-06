@@ -101,3 +101,26 @@ class ContiguousDataset(GenericDataset):
         }
         return ContiguousDataset(d, blocks)
         
+def BlockedDataLoader(dataset, inds=None, batch_size=1):
+    '''
+    Creates a dataloader that returns contiguous blocks of data from a dataset.
+    Each block includes multiple samples, here "batch_size" operates on the block level and
+    the returned batches will NOT necessarily have the same size
+    '''
+    from torch.utils.data import DataLoader
+    if inds is None:
+        inds = list(range(len(dataset)))
+
+    sampler = torch.utils.data.sampler.BatchSampler(
+                torch.utils.data.sampler.SubsetRandomSampler(inds),
+                batch_size=batch_size,
+                drop_last=True)
+
+    if dataset[0]['stim'].device.type == 'cuda':
+        num_workers = 0
+    else:
+        import os
+        num_workers = os.cpu_count()//2
+
+    dl = DataLoader(dataset, sampler=sampler, batch_size=None, num_workers=num_workers)
+    return dl
