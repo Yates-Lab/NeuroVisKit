@@ -279,11 +279,12 @@ class local(RegularizationModule):
             w_permuted = w.permute(*relevant_permute_dims, ind)
             w_permuted = w_permuted.reshape(-1, *w_permuted.shape[-2:])
             # reshape while keeping he channel dimension intact
-            w_permuted = w_permuted.mean(0) #sum over leftover dims
-            # w_permuted = gradLessDivide.apply(w_permuted, w.shape[-2])
+            # w_permuted = w_permuted.mean(0) #sum over leftover dims
+            w_permuted = gradLessDivide.apply(w_permuted.sum(0), w_permuted.shape[0])
             ## quadratic form: W^T M W
             temp = w_permuted @ mat
-            temp = (temp * w_permuted).mean(1)
+            temp = temp * w_permuted
+            temp = gradLessDivide.apply(temp.sum(1), temp.shape[1])
             # norm = w.shape[ind]*w.shape[-2]
             pen = pen + temp#gradLessDivide.apply(temp,mat.shape[0])
         return pen.sum()#gradLessDivide.apply(pen.sum(), self.norm)
