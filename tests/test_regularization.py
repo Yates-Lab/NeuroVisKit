@@ -126,7 +126,19 @@ reg_loss = lambda x: regpen(x)
 ws, grad = run_reg(ws, reg_loss, alpha=0.1, nsteps=450)
 
 plot_weights_grad(ws0, ws, grad, cc=0)
+#%%
+ws = ws0.clone().detach()#[:, :, ::4, ::4, :]
+ws.requires_grad = True
+regpen = reg.Compose(
+    reg.fourierLocal(coefficient=0.0001, target=ws, dims=[2,3], keepdims=0),
+    reg.local(coefficient=100, target=ws, dims=[2,3], keepdims=0)
+)
 
+reg_loss = lambda x: regpen(x)
+
+ws, grad = run_reg(ws, reg_loss, alpha=0.1, nsteps=450)
+
+plot_weights_grad(ws0, ws, grad, cc=0)
 # %% test smoothness
 
 ws = ws0.clone().detach()

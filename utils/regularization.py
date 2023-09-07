@@ -283,7 +283,7 @@ class local(RegularizationModule):
             # w_permuted = gradLessDivide.apply(w_permuted, w.shape[-2])
             ## quadratic form: W^T M W
             temp = w_permuted @ mat
-            temp = (temp * w_permuted).sum(1)
+            temp = (temp * w_permuted).mean(1)
             # norm = w.shape[ind]*w.shape[-2]
             pen = pen + temp#gradLessDivide.apply(temp,mat.shape[0])
         return pen.sum()#gradLessDivide.apply(pen.sum(), self.norm)
