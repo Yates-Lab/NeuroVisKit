@@ -57,7 +57,7 @@ def plot_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs
     
     for i in tqdm(range(n), desc=desc):
         for j in range(m):
-            axes[i, j].imshow(mat[i][j], vmin=vmin, vmax=vmax)
+            axes[i, j].imshow(mat[i][j], vmin=vmin, vmax=vmax, interpolation='none')
             axes[i, j].axis('off')
 
             if titles is not None:

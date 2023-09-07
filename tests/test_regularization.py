@@ -11,7 +11,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 #%% make fake data
-
+#!%load_ext autoreload
+#!%autoreload 2
 # make receptive fields
 def make_gabors(dim, NC, sigma=0.5):
     filters = []
@@ -108,11 +109,11 @@ import NeuroVisKit.utils.regularization as reg
 
 ws = ws0.clone().detach()
 ws.requires_grad = True
-regpen = reg.local(coefficient=.1, target=ws, dims=[2,3])
+regpen = reg.local(coefficient=5, target=ws, dims=[2,3], keepdims=0)
 
 reg_loss = lambda x: regpen(x)
 
-ws, grad = run_reg(ws0, reg_loss, alpha=0.1, nsteps=1)
+ws, grad = run_reg(ws0, reg_loss, alpha=0.1, nsteps=450)
 
 plot_weights_grad(ws0, ws, grad, cc=0)
 

@@ -259,27 +259,31 @@ class local(RegularizationModule):
             self.register_buffer(f'local_pen{ind}', v)
         
         # self.f = GradMagnitudeLogger("local")
-
     def function(self, x):
-        # x = self.f(x)
         w = x**2
+        self.shape = w.shape
         w = w.permute(*self.dims, *self.leftover_dims, *self.keepdims)
         w = w.reshape(
             *[self.shape[i] for i in self.dims],
             -1,
-            reduce(lambda x,y:x*y, [self.shape[i] for i in self.keepdims], 1),
-        ) # reshape to dims, -1, flattened keepdims
+            np.prod([self.shape[i] for i in self.keepdims], dtype=int),
+        )
         pen = 0
         for ind, dim in enumerate(self.dims):
+            # get the regularization matrix
             mat = getattr(self, f'local_pen{dim}') # shape = (i,j)
-            w_permuted_shape = list(range(len(w.shape))) # [*dims.shape, -1, prod(keepdims.shape)]
-            w_permuted_shape.remove(ind)
-            w_permuted = w.permute(w_permuted_shape+[ind])
-            w_permuted = w_permuted.sum(list(range(len(w_permuted.shape)-2)))
+            # permute targeted dim to the end
+            relevant_permute_dims = list(range(len(w.shape)))
+            relevant_permute_dims.remove(ind)
+            w_permuted = w.permute(*relevant_permute_dims, ind)
+            w_permuted = w_permuted.reshape(-1, *w_permuted.shape[-2:])
+            # reshape while keeping he channel dimension intact
+            w_permuted = w_permuted.mean(0) #sum over leftover dims
+            ## quadratic form: W^T M W
             temp = w_permuted @ mat
-            temp = torch.einsum('nj,nj->n', temp, w_permuted)
-            pen = pen + gradLessDivide.apply(temp, mat.shape[0])
-        return gradLessDivide.apply(pen, self.norm)
+            temp = (temp * w_permuted).sum(1)
+            pen = pen + temp/(mat.shape[0])
+        return pen*1e6
 
 class glocal(local):
     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
