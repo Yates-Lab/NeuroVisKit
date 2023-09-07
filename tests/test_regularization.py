@@ -46,7 +46,7 @@ def make_gabors(dim, NC, sigma=0.5):
 #%% make fake data
 
 NC = 25
-dim = (36,36,24)
+dim = (72,72,24)
 
 gabor_filters = make_gabors(dim, NC)
 gabor_filters += torch.randn_like(gabor_filters)*0.1
@@ -107,13 +107,13 @@ def plot_weights_grad(ws0, ws, grad, cc=0):
 # %% test foundation regularization (glocalx)
 import NeuroVisKit.utils.regularization as reg
 
-ws = ws0.clone().detach()
+ws = ws0.clone().detach()#[:, :, ::2, ::2, :]
 ws.requires_grad = True
-regpen = reg.local(coefficient=5, target=ws, dims=[2,3], keepdims=0)
+regpen = reg.local(coefficient=0.1, target=ws, dims=[2,3], keepdims=0)
 
 reg_loss = lambda x: regpen(x)
 
-ws, grad = run_reg(ws0, reg_loss, alpha=0.1, nsteps=450)
+ws, grad = run_reg(ws, reg_loss, alpha=0.1, nsteps=450)
 
 plot_weights_grad(ws0, ws, grad, cc=0)
 
