@@ -107,9 +107,19 @@ def plot_weights_grad(ws0, ws, grad, cc=0):
 # %% test foundation regularization (glocalx)
 import NeuroVisKit.utils.regularization as reg
 
-ws = ws0.clone().detach()[:, :, ::4, ::4, :]
+ws = ws0.clone().detach()#[:, :, ::4, ::4, :]
 ws.requires_grad = True
-regpen = reg.local(coefficient=0.001, target=ws, dims=[2,3], keepdims=0)
+regpen = reg.local(coefficient=100, target=ws, dims=[2,3], keepdims=0)
+
+reg_loss = lambda x: regpen(x)
+
+ws, grad = run_reg(ws, reg_loss, alpha=0.1, nsteps=450)
+
+plot_weights_grad(ws0, ws, grad, cc=0)
+#%%
+ws = ws0.clone().detach()#[:, :, ::4, ::4, :]
+ws.requires_grad = True
+regpen = reg.fourierLocal(coefficient=0.0001, target=ws, dims=[2,3], keepdims=0)
 
 reg_loss = lambda x: regpen(x)
 
@@ -132,7 +142,7 @@ plot_weights_grad(ws0, ws, grad, cc=0)
 #%% Combine smoothness and glocalx
 ws = ws0.clone().detach()
 ws.requires_grad = True
-regpen = reg.Compose(reg.laplacian(coefficient=10000, target=ws, dims=[2,3]),
+regpen = reg.Compose(reg.laplacian(coefficient=1, target=ws, dims=[2,3]),
                         reg.glocal(coefficient=1, target=ws, dims=[2,3]))
 
 reg_loss = lambda x: regpen(x)

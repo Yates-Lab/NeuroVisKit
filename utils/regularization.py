@@ -111,6 +111,7 @@ class RegularizationModule(Regularization):
         if normalize:
             x = x / x.norm()
         y = torch.mean(self.function(x) * self.coefficient)
+        assert y<1e10 and not torch.isnan(y), f'Penalty likely diverged for regularization type {self.__class__.__name__}'
         # print(f'{self.__class__.__name__}: {y}')
         return y
 
@@ -278,7 +279,7 @@ class local(RegularizationModule):
             w_permuted = w.permute(*relevant_permute_dims, ind)
             w_permuted = w_permuted.reshape(-1, *w_permuted.shape[-2:])
             # reshape while keeping he channel dimension intact
-            w_permuted = w_permuted.sum(0) #sum over leftover dims
+            w_permuted = w_permuted.mean(0) #sum over leftover dims
             # w_permuted = gradLessDivide.apply(w_permuted, w.shape[-2])
             ## quadratic form: W^T M W
             temp = w_permuted @ mat
@@ -291,6 +292,16 @@ class glocal(local):
     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
         super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
         
+class fourierLocal(local):
+    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
+        if shape is None and 'target' in kwargs and kwargs['target'] is not None:
+            shape = list(kwargs['target'].shape)
+            dims_temp = _verify_dims(shape, dims)
+            shape[dims_temp[-1]] = shape[dims_temp[-1]]//2+1
+        super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
+    def function(self, x):
+        return super().function(torch.abs(torch.fft.fftshift(torch.fft.rfftn(x, dim=self.dims))))
+    
 class glocalNDNT(RegularizationModule):
     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
         super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
