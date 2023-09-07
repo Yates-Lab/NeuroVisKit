@@ -107,9 +107,9 @@ def plot_weights_grad(ws0, ws, grad, cc=0):
 # %% test foundation regularization (glocalx)
 import NeuroVisKit.utils.regularization as reg
 
-ws = ws0.clone().detach()#[:, :, ::2, ::2, :]
+ws = ws0.clone().detach()[:, :, ::4, ::4, :]
 ws.requires_grad = True
-regpen = reg.local(coefficient=0.1, target=ws, dims=[2,3], keepdims=0)
+regpen = reg.local(coefficient=0.001, target=ws, dims=[2,3], keepdims=0)
 
 reg_loss = lambda x: regpen(x)
 
