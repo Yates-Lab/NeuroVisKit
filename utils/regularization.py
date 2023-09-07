@@ -279,14 +279,15 @@ class local(RegularizationModule):
             w_permuted = w.permute(*relevant_permute_dims, ind)
             w_permuted = w_permuted.reshape(-1, *w_permuted.shape[-2:])
             # reshape while keeping he channel dimension intact
-            # w_permuted = w_permuted.mean(0) #sum over leftover dims
-            w_permuted = gradLessDivide.apply(w_permuted.sum(0), w_permuted.shape[0])
+            w_permuted = w_permuted.sum(0) #sum over leftover dims
+            # w_permuted = gradLessDivide.apply(w_permuted.sum(0), w_permuted.shape[0])
             ## quadratic form: W^T M W
             temp = w_permuted @ mat
             temp = temp * w_permuted
-            temp = gradLessDivide.apply(temp.sum(1), temp.shape[1])
+            # temp = temp.sum(1)
+            # temp = gradLessDivide.apply(temp.sum(1), temp.shape[1])
             # norm = w.shape[ind]*w.shape[-2]
-            pen = pen + temp#gradLessDivide.apply(temp,mat.shape[0])
+            pen = pen + temp.sum(1)#gradLessDivide.apply(temp,mat.shape[0])
         return pen.sum()#gradLessDivide.apply(pen.sum(), self.norm)
 
 class glocal(local):
@@ -391,8 +392,10 @@ class Convolutional(RegularizationModule):
 
         x = F.pad(x, self._padding, mode=self.padding_mode)
         pen = self.conv(x, self.kernel)**2
-        pen = gradLessDivide.apply(pen.sum((0, 1)), np.prod(pen.shape[:2]))
-        pen = gradLessPower.apply(pen, 0.5)
+        pen = pen.sum((0,1))
+
+        # pen = gradLessDivide.apply(pen.sum((0, 1)), np.prod(pen.shape[:2]))
+        # pen = gradLessPower.apply(pen, 0.5)
         return reduction(pen)
 
 class localConv(Convolutional):
@@ -428,9 +431,13 @@ class laplacian(Convolutional):
         elif len(dims) == 2:
             kernel = torch.tensor([[0.25,0.5,0.25],[0.5,-3,0.5],[0.25,0.5,0.25]], dtype=torch.float32)
         elif len(dims) == 3:
-            kernel = torch.tensor([[[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-                                   [[0, 1, 0], [1, -6, 1], [0, 1, 0]],
-                                   [[0, 0, 0], [0, 1, 0], [0, 0, 0]]], dtype=torch.float32)
+            # kernel = torch.tensor([[[0, 0, 0], [0, 1, 0], [0, 0, 0]],
+            #                        [[0, 1, 0], [1, -6, 1], [0, 1, 0]],
+            #                        [[0, 0, 0], [0, 1, 0], [0, 0, 0]]], dtype=torch.float32)
+            
+            kernel = 1/26*torch.tensor([[[2, 3, 2], [3, 6, 3], [2, 3, 2]],
+                                   [[3, 6, 3], [6, -88, 6], [3, 6, 3]],
+                                   [[2, 3, 2], [3, 6, 3], [2, 3, 2]]], dtype=torch.float32)
         else:
             raise NotImplementedError('Laplacian not implemented for {} dimensions'.format(len(dims)))
         super().__init__(coefficient=coefficient, kernel=kernel, dims=dims, **kwargs)
@@ -438,8 +445,9 @@ class laplacian(Convolutional):
     def function(self, x):
         def reduce(v):
             # norm = v.numel()**((len(v.shape)-1)/len(v.shape))
-            norm = np.mean(v.shape)**(len(v.shape)-1) #geom mean
-            return gradLessDivide.apply(v.sum(), norm)
+            # norm = np.mean(v.shape)**(len(v.shape)-1) #geom mean
+            # return gradLessDivide.apply(v.sum(), norm)
+            return v.mean()
         return super().function(x, reduction=reduce)
 
 # class huber(torch.autograd.Function):
