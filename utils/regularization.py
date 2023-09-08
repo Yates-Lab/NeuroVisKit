@@ -355,27 +355,37 @@ class edge(RegularizationModule):
         return pen/len(self.dims)
 
 class center(RegularizationModule):
-    def __init__(self, coefficient=1, shape=None, dims=None, **kwargs):
+    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
 
         if shape is None and 'target' in kwargs and kwargs['target'] is not None:
             shape = list(kwargs['target'].shape)
             
-        super().__init__(coefficient=coefficient, shape=shape, dims=dims, **kwargs)
+        super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
         # assert self.shape is not None, 'Must specify expected shape of item to be penalized'
         self.dims = _verify_dims(self.shape, self.dims)
+        self.leftover_dims = [i for i in range(len(self.shape)) if i not in self.dims and i not in self.keepdims]
+
         ranges = [torch.linspace(-1, 1, shape[i]) for i in self.dims]
-        center = [shape[i]/2 for i in self.dims]
+        # center = [shape[i]/2 for i in self.dims]
         grids = torch.meshgrid(*ranges)
         distances = 0
-        for i, j in zip(grids, center):
-            distances = distances + (i-j)**2
+        for g in grids:
+            distances = distances + g**2
+        # for i, j in zip(grids, center):
+        #     distances = distances + (i-j)**2
         distances = distances ** 0.5
-        distances = distances - distances.min()
+        # distances = distances - distances.min()
         self.register_buffer('center_pen', distances)
     def function(self, x):
         w = x**2
-        w = w.mean([i for i in range(len(self.shape)) if i not in self.dims])
-        return torch.mean(w*self.center_pen)
+        w = w.permute(*self.dims, *self.leftover_dims, *self.keepdims)
+        w = w.reshape(
+            *[self.shape[i] for i in self.dims],
+            -1,
+            np.prod([self.shape[i] for i in self.keepdims], dtype=int),
+        )
+
+        return (w.mean(-2)*self.center_pen[...,None]).sum()
 
 class fourierCenter(center):
     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
@@ -384,6 +394,9 @@ class fourierCenter(center):
             # dims_temp = _verify_dims(shape, dims)
             # shape[dims_temp[-1]] = shape[dims_temp[-1]]//2+1
         super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
+        # penalize the DC as well
+        self.center_pen = torch.exp(-self.center_pen/5**2) + self.center_pen
+
     def function(self, x):
         return super().function(torch.abs(torch.fft.fftshift(torch.fft.fftn(x, dim=self.dims))))
     
