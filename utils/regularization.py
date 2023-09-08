@@ -356,8 +356,12 @@ class edge(RegularizationModule):
 
 class center(RegularizationModule):
     def __init__(self, coefficient=1, shape=None, dims=None, **kwargs):
+
+        if shape is None and 'target' in kwargs and kwargs['target'] is not None:
+            shape = list(kwargs['target'].shape)
+            
         super().__init__(coefficient=coefficient, shape=shape, dims=dims, **kwargs)
-        assert self.shape is not None, 'Must specify expected shape of item to be penalized'
+        # assert self.shape is not None, 'Must specify expected shape of item to be penalized'
         self.dims = _verify_dims(self.shape, self.dims)
         ranges = [torch.linspace(-1, 1, shape[i]) for i in self.dims]
         center = [shape[i]/2 for i in self.dims]
@@ -372,9 +376,19 @@ class center(RegularizationModule):
         w = x**2
         w = w.mean([i for i in range(len(self.shape)) if i not in self.dims])
         return torch.mean(w*self.center_pen)
+
+class fourierCenter(center):
+    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
+        # if shape is None and 'target' in kwargs and kwargs['target'] is not None:
+            # shape = list(kwargs['target'].shape)
+            # dims_temp = _verify_dims(shape, dims)
+            # shape[dims_temp[-1]] = shape[dims_temp[-1]]//2+1
+        super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
+    def function(self, x):
+        return super().function(torch.abs(torch.fft.fftshift(torch.fft.fftn(x, dim=self.dims))))
     
 class Convolutional(RegularizationModule):
-    def __init__(self, coefficient=1, kernel=None, dims=None, padding='same', padding_mode='replicate', **kwargs):
+    def __init__(self, coefficient=1, kernel=None, dims=None, padding='same', padding_mode='constant', **kwargs):
         super().__init__(coefficient=coefficient, dims=dims, **kwargs)
         assert kernel is not None, 'Must specify kernel for laplacian'
         if dims is not None:
