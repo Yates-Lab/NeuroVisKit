@@ -6,6 +6,21 @@ import torch.nn as nn
 from NeuroVisKit.utils.process import get_process_dict
 from NeuroVisKit._utils.utils import compose
 
+def pl_device_format(device):
+    """Convert a torch device to the format expected by pytorch lightning.
+    **ONLY WORKS FOR SINGLE DEVICE**
+
+    Args:
+        device: str or device object describing which device to use
+
+    Returns:
+        str: the device formatted for pytorch lightning
+    """
+    if type(device) == torch.device:
+        device = str(device)
+    if type(device) == str:
+        return ",".join(device.split("cuda:"))[1:] + ','
+
 class PreprocessFunction(nn.Module):
     """Module that applies a list of specified preprocess functions.
 
