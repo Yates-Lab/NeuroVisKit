@@ -200,10 +200,10 @@ class ProximalPnorm(RegularizationModule):
             self.target.data = out
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
     
-class ProximalL1(ProximalPnorm):
+class proximalL1(ProximalPnorm):
     def __init__(self, coefficient=1, target=None, **kwargs):
         super().__init__(coefficient=coefficient, target=target, p=1, **kwargs)
-class ProximalL2(ProximalPnorm):
+class proximalL2(ProximalPnorm):
     def __init__(self, coefficient=1, target=None, **kwargs):
         super().__init__(coefficient=coefficient, target=target, p=2, **kwargs)
     
