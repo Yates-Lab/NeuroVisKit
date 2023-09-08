@@ -91,6 +91,7 @@ class PytorchWrapper(ModelWrapper):
             self.cids = cids
         self.reg = regularization.extract_reg(self.model, proximal=False)
         self.proximal_reg = regularization.extract_reg(self.model, proximal=True)
+        print("initialized", self.reg, self.proximal_reg)
     def compute_reg_loss(self, *args, **kwargs):
         loss = sum([r() for r in self.reg]+[0])
         # if type(loss) is int:
@@ -229,11 +230,14 @@ class CoreC(nn.Module):
         self.input_dims = input_dims
         self.nl = nl
         self.num_lags = num_lags
-        self.c1 = DropoutBlock(CBlock3D(input_dims[0], 20, k=(num_lags, 11, 11), padding=0), p=0.05)
+        self.c1 = CBlock3D(input_dims[0], 20, k=(num_lags, 11, 11), padding=0)
         self.c2 = nn.Sequential(
-            DropoutBlock(CBlock2D(20, 20, k=11, padding="same"), p=0.05),
-            DropoutBlock(CBlock2D(20, 20, k=11, padding="same"), p=0.05),
-            DropoutBlock(CBlock2D(20, 20, k=11, padding="same"), p=0.05),
+            CBlock2D(20, 20, k=11, padding="same"),
+            CBlock2D(20, 20, k=11, padding="same"),
+            CBlock2D(20, 20, k=11, padding="same"),
+        )
+        self.regs = regularization.Compose(
+            regularization.fourierLocal(1e-3, target=self.c1.c.weight, dims=(2, 3, 4), keepdims=(0, 1)),
         )
     def forward(self, x):
         x = x.squeeze(1).permute(1, 0, 2, 3).unsqueeze(0)
@@ -255,6 +259,7 @@ class DenseReadoutC(nn.Module):
         self.reg = regularization.Compose(
             regularization.local(1e-1, target=self.space, dims=(0, 1), keepdims=2),
             regularization.l2(1e-7, keepdims=-1, target=self.space),
+            # regularization.proximalL1(1e-4, keepdims=-1, target=self.feature),
             regularization.l1(1e-5, keepdims=-1, target=self.feature)
         )
     def forward(self, x):

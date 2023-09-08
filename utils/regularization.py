@@ -1,4 +1,4 @@
-### regularization.py: managing regularization
+#%%## regularization.py: managing regularization
 import torch
 from torch import nn
 from torch.nn.modules.utils import _reverse_repeat_tuple
@@ -12,13 +12,17 @@ def extract_reg(module, proximal=False):
     def get_reg_helper(module):
         out_modules = []
         for current_module in module.children():
-            if issubclass(type(current_module), Regularization) and proximal == issubclass(type(current_module), ProximalRegularization):
-                out_modules.append(current_module)
-            elif isinstance(current_module, nn.Module):
-                    out_modules += get_reg_helper(current_module)
+            if hasattr(current_module, '_parent_class'): # critical for extract_reg to work when importing from different paths
+                isproximal = issubclass(current_module._parent_class, ProximalRegularizationModule)
+                isregmodule = issubclass(current_module._parent_class, RegularizationModule)
+                if isproximal or isregmodule:
+                    if proximal == isproximal:
+                        out_modules.append(current_module)
+            elif issubclass(type(current_module), nn.Module):
+                out_modules += get_reg_helper(current_module)
         return out_modules
     return get_reg_helper(module)
-
+#%%
 def get_regs_dict():
     return {
         k:v for k,v in globals().items()
@@ -45,7 +49,7 @@ class Regularization(nn.Module):
     def __init__(self):
         super().__init__()
 
-class ProximalRegularization(Regularization):
+class ProximalRegularizationModule(Regularization):
     def __init__(self, coefficient=1, target=None, shape=None, dims=None, keepdims=None, **kwargs):
         super().__init__()
         assert hasattr(target, 'data'), 'Target must be a parameter so we can change it in-place'
@@ -63,6 +67,7 @@ class ProximalRegularization(Regularization):
         self.coefficient = coefficient
         self.target = target
         self.keepdims = _verify_dims(self.shape, keepdims) if keepdims is not None else []
+        self._parent_class = ProximalRegularizationModule # critical for extract_reg to work when importing from different paths
         
         self.log_gradients = kwargs.get('log_gradients', False)
     def proximal(self):
@@ -71,8 +76,8 @@ class ProximalRegularization(Regularization):
         If easy, should return proximal gradients for visualization purposes
         """
         raise NotImplementedError
-    def forward(self, x=None):
-        out = torch.mean(self.proximal(x))
+    def forward(self):
+        out = torch.mean(self.proximal())
         if self.log_gradients:
             self.log(out)
         # print(f'{self.__class__.__name__}: {y}')
@@ -99,13 +104,13 @@ class RegularizationModule(Regularization):
         self.coefficient = coefficient
         self.target = target
         self.keepdims = _verify_dims(self.shape, keepdims) if keepdims is not None else []
+        self._parent_class = RegularizationModule # critical for extract_reg to work when importing from different paths
         
         self.log_gradients = kwargs.get('log_gradients', False)
     def function(self, x):
         raise NotImplementedError
-    def forward(self, x=None, normalize=False):
-        if x is None:
-            x = self.target
+    def forward(self, normalize=False):
+        x = self.target
         if self.log_gradients:
             x = self.log(x)
         if normalize:
@@ -122,8 +127,10 @@ class Compose(Regularization): #@TODO change to module list or remove entirely
     def __init__(self, *RegModules):
         super().__init__()
         self.args = nn.ModuleList(RegModules)
-    def forward(self, x=None):
-        return sum([arg(x) for arg in self.args])
+    def forward(self):
+        return sum([arg() for arg in self.args])
+    def __getitem__(self, i):
+        return self.args[i]
 
 class gradMagLog(torch.autograd.Function):
     @staticmethod
@@ -188,12 +195,13 @@ class Pnorm(RegularizationModule):
         #     out = out/x.numel()
         return out
     
-class ProximalPnorm(RegularizationModule):
+class ProximalPnorm(ProximalRegularizationModule):
     def __init__(self, coefficient=1, target=None, p=1, **kwargs):
         super().__init__(coefficient=coefficient, target=target, **kwargs)
         self.p = p
-    def proximal(self, x):
+    def proximal(self):
         # Calculate proximal operator for p-norm
+        x = self.target
         norm = x.norm(self.p, dim=self.dims, keepdim=True)
         out = x / (norm + 1e-8) * (norm - self.coefficient).clamp(min=0)
         with torch.no_grad():
@@ -503,3 +511,4 @@ def _calculate_padding(kernel_size, padding="same"):
     else:
         _reversed_padding_repeated_twice = _reverse_repeat_tuple(padding, 2)
     return _reversed_padding_repeated_twice
+# %%
