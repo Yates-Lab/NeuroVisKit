@@ -14,7 +14,24 @@ from .mei import irf, get_gratings, irfC
 from .cluster import corr_dist, cos_dist
 from .utils import to_device
 from scipy.signal import find_peaks
+import torch.nn as nn
 
+def plot_model_conv(model):
+    i = 0
+    for module in model.modules():
+        # check if convolutional layer
+        if issubclass(type(module), nn.modules.conv._ConvNd):
+            w = module.weight.data.cpu().numpy()
+            if len(w.shape) == 5: # 3d conv (cout, cin, x, y, t)
+                w = w.squeeze(1) # asume cin is 1
+                w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize xyt
+            elif len(w.shape) == 4: # 2d conv (cout, cin, x, y)
+                w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize cin xy
+            # shape is (cout, cin, x, y)
+            titles = ['cout %d'%i for i in range(w.shape[0])]
+            plot_grid(w, titles=titles, suptitle='Layer %d'%i, desc='Layer %d'%i, vmin=-1, vmax=1)
+            i += 1
+            
 class Loader():
     def __init__(self, ds, cyclic=True, shuffled=False):
         self.ds = ds
