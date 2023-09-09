@@ -158,18 +158,7 @@ logger.log('Plotting model.')
 if is_ndnt_plottable:
     utils.plot_model(model.model)
 else:
-    i = 0
-    for module in model.model.modules():
-        # check if convolutional layer
-        if issubclass(type(module), nn.modules.conv._ConvNd):
-            w = module.weight.data.cpu().numpy()
-            if len(w.shape) == 5:
-                w = w.squeeze(1) # asume cin is 1
-            w = w/np.abs(w).max((0, 2, 3), keepdims=True) # normalize
-            # shape is (cout, cin, x, y)
-            titles = ['cout %d'%i for i in range(w.shape[0])]
-            utils.plot_grid(w, titles=titles, suptitle='Layer %d'%i, desc='Layer %d'%i, vmin=-1, vmax=1)
-            i += 1
+    utils.plot_model_conv(model)
 logger.log('Plotted model.')
 # %%
 with open(tosave_path+'.txt', 'w') as f:

@@ -4,15 +4,22 @@ This script tests the new regularization modules in foundation.utils.regularizat
 It compares them against the NDNT implementation
 '''
 #%%
+#!%load_ext autoreload
+#!%autoreload 2
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+plt.rcParams.update({
+    "figure.facecolor":  (1.0, 1.0, 1.0, 1),  # red   with alpha = 30%
+    "axes.facecolor":    (1.0, 1.0, 1.0, 1),  # green with alpha = 50%
+    "savefig.facecolor": (1.0, 1.0, 1.0, 1),  # blue  with alpha = 20%
+})
+
 #%% make fake data
-#!%load_ext autoreload
-#!%autoreload 2
+
 # make receptive fields
 def make_gabors(dim, NC, sigma=0.5):
     filters = []
@@ -42,11 +49,43 @@ def make_gabors(dim, NC, sigma=0.5):
     
     return torch.stack(filters)
 
+def step_reg(ws, reg, alpha=0.1, proximal=False):
+    if proximal:
+        grad = ws.detach().clone()
+        pen = reg()
+        grad = ws.detach().clone() - grad
+    else:
+        pen = reg()
+        grad = torch.autograd.grad(pen, reg.target)[0]
+        ws = ws - alpha*grad 
+    return ws, grad, pen
+
+def run_reg(ws, reg, alpha=0.1, nsteps=100, verbose=True, proximal=False):
+    ws.requires_grad = True
+    for i in range(nsteps):
+        ws, grad, pen = step_reg(ws, reg, alpha, proximal=proximal)
+        if verbose:
+            print("type:", reg.__name__, "step: ", i, "penalty: ", pen.item())
+    return ws, grad
+
+def plot_weights_grad(ws0, ws, grad, cc=0):
+    plt.figure(figsize=(12,4))
+    i = ws0.shape[-1]//2
+    plt.subplot(1,3,1)
+    plt.imshow(ws0[cc, 0, :, :, i].detach().cpu())
+    plt.colorbar()
+    plt.subplot(1,3,2)
+    plt.imshow(ws[cc, 0, :, :, i].detach().cpu())
+    plt.colorbar()
+    plt.subplot(1,3,3)
+    plt.imshow(grad[cc, 0, :, :, i].detach().cpu())
+    plt.colorbar()
+
+
 
 #%% make fake data
-
 NC = 25
-dim = (72,72,24)
+dim = (36,36,24)
 
 gabor_filters = make_gabors(dim, NC)
 gabor_filters += torch.randn_like(gabor_filters)*0.1
@@ -57,7 +96,6 @@ keepdims = [0]
 w = w.permute(*[i for i in range(len(w.shape)) if i not in keepdims], *keepdims)
 print("w shape: ", w.shape)
 
-#%%
 # plot filters
 sx = int(np.ceil(np.sqrt(NC)))
 sy = int(np.ceil(NC/sx))
@@ -76,159 +114,36 @@ ws.requires_grad = True
 
 #%%
 
-def step_reg(ws, reg_loss, alpha=0.1):
-    pen = reg_loss(ws)
-    grad = torch.autograd.grad(pen, ws)[0]
-    ws = ws - alpha*grad 
-    return ws, grad, pen
-
-def run_reg(ws, reg_loss, alpha=0.1, nsteps=100, verbose=True):
-    ws.requires_grad = True
-    for i in range(nsteps):
-        ws, grad, pen = step_reg(ws, reg_loss, alpha)
-        if verbose:
-            print("step: ", i, "penalty: ", pen.item())
-    return ws, grad
-
-def plot_weights_grad(ws0, ws, grad, cc=0):
-    plt.figure(figsize=(12,4))
-    i = ws0.shape[-1]//2
-    plt.subplot(1,3,1)
-    plt.imshow(ws0[cc, 0, :, :, i].detach().cpu())
-    plt.colorbar()
-    plt.subplot(1,3,2)
-    plt.imshow(ws[cc, 0, :, :, i].detach().cpu())
-    plt.colorbar()
-    plt.subplot(1,3,3)
-    plt.imshow(grad[cc, 0, :, :, i].detach().cpu())
-    plt.colorbar()
 
 
 # %% test foundation regularization (glocalx)
 import NeuroVisKit.utils.regularization as reg
-
-ws = ws0.clone().detach()#[:, :, ::4, ::4, :]
-ws.requires_grad = True
-regpen = reg.local(coefficient=100, target=ws, dims=[2,3], keepdims=0)
-
-reg_loss = lambda x: regpen(x)
-
-ws, grad = run_reg(ws, reg_loss, alpha=0.1, nsteps=450)
-
-plot_weights_grad(ws0, ws, grad, cc=0)
+import time
+regs = reg.get_regs_dict()
+print("detected regs: ", regs.keys())
+nsteps = 450
+for k, v in regs.items():
+    ws = ws0.clone().detach()
+    regpen = v(target=ws, dims=[2,3], keepdims=0)
+    stime = time.time()
+    if regpen._parent_class.__name__ == "RegularizationModule":
+        ws, grad = run_reg(ws, regpen, alpha=1e-1, nsteps=nsteps, proximal=False)
+    elif regpen._parent_class.__name__ == "ProximalRegularizationModule":
+        ws, grad = run_reg(ws, regpen, alpha=1, nsteps=nsteps, proximal=True)
+    stime = (time.time() - stime)/nsteps
+    plot_weights_grad(ws0, ws, grad, cc=0)
+    plt.gcf().suptitle(f"{k} ({stime:.2f} s/step)")
+    plt.gcf().tight_layout()
+    plt.show()
+    del ws, regpen, grad
+        
 #%%
-ws = ws0.clone().detach()#[:, :, ::4, ::4, :]
-ws.requires_grad = True
-regpen = reg.fourierLocal(coefficient=0.0001, target=ws, dims=[2,3], keepdims=0)
-
-reg_loss = lambda x: regpen(x)
-
-ws, grad = run_reg(ws, reg_loss, alpha=0.1, nsteps=450)
-
-plot_weights_grad(ws0, ws, grad, cc=0)
-#%%
-ws = ws0.clone().detach()#[:, :, ::4, ::4, :]
-ws.requires_grad = True
-regpen = reg.Compose(
-    reg.fourierLocal(coefficient=0.0001, target=ws, dims=[2,3], keepdims=0),
-    reg.local(coefficient=100, target=ws, dims=[2,3], keepdims=0)
-)
-
-reg_loss = lambda x: regpen(x)
-
-ws, grad = run_reg(ws, reg_loss, alpha=0.1, nsteps=450)
-
-plot_weights_grad(ws0, ws, grad, cc=0)
-# %% test smoothness
-
-ws = ws0.clone().detach()
-ws.requires_grad = True
-regpen = reg.laplacian(coefficient=10000, target=ws, dims=[2,3])
-
-reg_loss = lambda x: regpen(x)
-
-ws, grad = run_reg(ws0, reg_loss, alpha=0.1, nsteps=500)
-
-plot_weights_grad(ws0, ws, grad, cc=0)
-
-#%% Combine smoothness and glocalx
-ws = ws0.clone().detach()
-ws.requires_grad = True
-regpen = reg.Compose(reg.laplacian(coefficient=1, target=ws, dims=[2,3]),
-                        reg.glocal(coefficient=1, target=ws, dims=[2,3]))
-
-reg_loss = lambda x: regpen(x)
-
-ws, grad = run_reg(ws0, reg_loss, alpha=0.001, nsteps=500)
-
-plot_weights_grad(ws0, ws, grad, cc=0)
-
-# #%% local Conv
-
-# ## THIS IS TOO SLOW :(
 # ws = ws0.clone().detach()
 # ws.requires_grad = True
-# regpen = reg.localConv(coefficient=1, target=ws, dims=[2,3], padding='same', padding_mode='constant', normalize=False)
+# regpen = reg.local(coefficient=.0001, target=ws, dims=[2,3])
 
 # reg_loss = lambda x: regpen(x)
 
-# ws, grad = run_reg(ws0, reg_loss, alpha=0.001, nsteps=10)
+# ws, grad = run_reg(ws0, reg_loss, alpha=0.1, nsteps=5500)
 
 # plot_weights_grad(ws0, ws, grad, cc=0)
-
-#%% test that regularization doesn't scale with number of filters or upsampling
-NC = 10
-dim = (15,15,24)
-gabor_filters = make_gabors(dim, NC)
-gabor_filters += torch.randn_like(gabor_filters)*0.1
-
-print("weights shape: ", ws.shape)
-ws0 = gabor_filters.clone().detach().requires_grad_(True)
-
-ws1 = torch.cat([ws0, ws0], dim=0).detach()
-ws1.requires_grad = True
-
-regtypes = ['l1', 'l2', 'laplacian', 'local']
-for regtype in regtypes:
-    regpen0 = reg.__dict__[regtype](coefficient=1, target=ws0, dims=[2])
-    regpen1 = reg.__dict__[regtype](coefficient=1, target=ws1, dims=[2])
-
-    pen0 = regpen0(ws0)
-    pen1 = regpen1(ws1)
-
-    print("regtype: ", regtype, "pen0: ", pen0.item(), "pen1: ", pen1.item())
-
-
-# %%
-from torch.nn.functional import upsample
-
-# ws0 is gabor filters
-ws0 = gabor_filters.clone().detach().requires_grad_(True)
-
-# ws1 is upsampled ws0
-ws1 = upsample(ws0, scale_factor=2, mode='bilinear', align_corners=False)
-
-for regtype in regtypes:
-    regpen0 = reg.__dict__[regtype](coefficient=1, target=ws0, dims=[2])
-    regpen1 = reg.__dict__[regtype](coefficient=1, target=ws1, dims=[2])
-
-    pen0 = regpen0(ws0)
-    pen1 = regpen1(ws1)
-
-    print("regtype: ", regtype, "pen0: ", pen0.item(), "pen1: ", pen1.item())
-
-# %%
-
-import utils.regularization as reg
-
-ws = ws0.clone().detach()
-ws.requires_grad = True
-
-regpen = reg.glocal(coefficient=1, target=ws, dims=[2,3])
-
-reg_loss = lambda x: regpen(x)
-
-ws, grad = run_reg(ws0, reg_loss, alpha=0.001, nsteps=500)
-
-plot_weights_grad(ws0, ws, grad, cc=0)
-# %%
