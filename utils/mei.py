@@ -2,7 +2,7 @@
 import numpy as np
 from copy import deepcopy
 import matplotlib.pyplot as plt
-from utils.utils import plot_stim
+from NeuroVisKit.utils.utils import plot_stim
 import torch
 
 def irf(inp, model, cids, plot=False, shape=(35, 35, 24)):
