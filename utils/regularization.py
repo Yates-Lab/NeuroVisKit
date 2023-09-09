@@ -403,8 +403,7 @@ class fourierCenter(center):
             # shape[dims_temp[-1]] = shape[dims_temp[-1]]//2+1
         super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
         # penalize the DC as well
-        # self.register_buffer('center_pen', torch.exp(-self.center_pen/.5**2) + self.center_pen)
-        self.center_pen = .5*torch.exp(-self.center_pen.pow(2)/.05**2) + self.center_pen
+        self.center_pen = torch.exp(-self.center_pen/5**2) + self.center_pen
 
     def function(self, x):
         return super().function(torch.abs(torch.fft.fftshift(torch.fft.fftn(x, dim=self.dims))))
