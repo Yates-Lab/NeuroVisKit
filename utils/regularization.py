@@ -26,8 +26,8 @@ def extract_reg(module, proximal=False):
 def get_regs_dict():
     return {
         k:v for k,v in globals().items()
-        if inspect.isclass(v) and issubclass(v, RegularizationModule)
-            and k[0] != k[0].upper() # exclude classes that start with uppercase
+        if inspect.isclass(v) and (issubclass(v, ProximalRegularizationModule) or issubclass(v, RegularizationModule))
+            and k[0] != k[0].upper() # exclude classes that start with uppercase because they are abstract classes
     }
 
 def _verify_dims(shape, dims):
@@ -52,7 +52,7 @@ class Regularization(nn.Module):
 class ProximalRegularizationModule(Regularization):
     def __init__(self, coefficient=1, target=None, shape=None, dims=None, keepdims=None, **kwargs):
         super().__init__()
-        assert hasattr(target, 'data'), 'Target must be a parameter so we can change it in-place'
+        assert hasattr(target, 'data'), 'Target must be a tensor with a data attribute. Currently, target is of type: '+str(type(target))
         if isinstance(dims, int):
             dims = [dims]
         
@@ -201,18 +201,18 @@ class ProximalPnorm(ProximalRegularizationModule):
         self.p = p
     def proximal(self):
         # Calculate proximal operator for p-norm
-        x = self.target
-        norm = x.norm(self.p, dim=self.dims, keepdim=True)
-        out = x / (norm + 1e-8) * (norm - self.coefficient).clamp(min=0)
         with torch.no_grad():
+            x = self.target
+            norm = x.norm(self.p, dim=self.dims, keepdim=True)
+            out = x / (norm + 1e-8) * (norm - self.coefficient).clamp(min=0)
             self.target.data = out
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
     
 class proximalL1(ProximalPnorm):
-    def __init__(self, coefficient=1, target=None, **kwargs):
+    def __init__(self, coefficient=1e-1, target=None, **kwargs):
         super().__init__(coefficient=coefficient, target=target, p=1, **kwargs)
 class proximalL2(ProximalPnorm):
-    def __init__(self, coefficient=1, target=None, **kwargs):
+    def __init__(self, coefficient=1e-2, target=None, **kwargs):
         super().__init__(coefficient=coefficient, target=target, p=2, **kwargs)
     
 class l1(Pnorm):
@@ -222,28 +222,28 @@ class l2(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, p=2, **kwargs)
         
-class l1NDNT(Pnorm):
-    def __init__(self, coefficient=1, **kwargs):
-        super().__init__(coefficient=coefficient, **kwargs)
-        self.p = 1
-        # self.f = GradMagnitudeLogger("l1NDNT")
-    def function(self, x):
-        # x = self.f(x)
-        x = torch.abs(x)
-        x = x.permute(*self.keepdims, *[i for i in range(len(x.shape)) if i not in self.keepdims])
-        x = x.reshape(math.prod(self.keepdims), -1)
-        return x.mean(-1).mean()
-class l2NDNT(Pnorm):
-    def __init__(self, coefficient=1, **kwargs):
-        super().__init__(coefficient=coefficient, **kwargs)
-        self.p = 2
-        # self.f = GradMagnitudeLogger("l2NDNT")
-    def function(self, x):
-        # x = self.f(x)
-        x = x**self.p
-        x = x.permute(*self.keepdims, *[i for i in range(len(x.shape)) if i not in self.keepdims])
-        x = x.reshape(math.prod(self.keepdims), -1)
-        return x.mean(-1).mean()
+# class l1NDNT(Pnorm):
+#     def __init__(self, coefficient=1, target=None, **kwargs):
+#         super().__init__(coefficient=coefficient, target=target, **kwargs)
+#         self.p = 1
+#         # self.f = GradMagnitudeLogger("l1NDNT")
+#     def function(self, x):
+#         # x = self.f(x)
+#         x = torch.abs(x)
+#         x = x.permute(*self.keepdims, *[i for i in range(len(x.shape)) if i not in self.keepdims])
+#         x = x.norm(1, dim=self.dims)
+#         return x.mean(-1).mean()
+# class l2NDNT(Pnorm):
+#     def __init__(self, coefficient=1, **kwargs):
+#         super().__init__(coefficient=coefficient, **kwargs)
+#         self.p = 2
+#         # self.f = GradMagnitudeLogger("l2NDNT")
+#     def function(self, x):
+#         # x = self.f(x)
+#         x = x**self.p
+#         x = x.permute(*self.keepdims, *[i for i in range(len(x.shape)) if i not in self.keepdims])
+#         x = x.reshape(math.prod(self.keepdims), -1)
+#         return x.mean(-1).mean()
     
 class l4(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
@@ -298,12 +298,12 @@ class local(RegularizationModule):
             pen = pen + temp.sum(1)#gradLessDivide.apply(temp,mat.shape[0])
         return pen.sum()#gradLessDivide.apply(pen.sum(), self.norm)
 
-class glocal(local):
-    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
-        super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
+# class glocal(local):
+#     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
+#         super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
         
 class fourierLocal(local):
-    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
+    def __init__(self, coefficient=1e-3, shape=None, dims=None, keepdims=None, **kwargs):
         if shape is None and 'target' in kwargs and kwargs['target'] is not None:
             shape = list(kwargs['target'].shape)
             dims_temp = _verify_dims(shape, dims)
