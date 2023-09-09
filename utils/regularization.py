@@ -182,8 +182,9 @@ class Pnorm(RegularizationModule):
     def function(self, x):
         # x = self.f(x)
         out = (torch.abs(x)**self.p).sum()
-        out = gradLessDivide.apply(out, x.numel())
-        out = gradLessPower.apply(out, 1/self.p)
+
+        # out = gradLessDivide.apply(out, x.numel())
+        # out = gradLessPower.apply(out, 1/self.p)
         # with torch.no_grad():
         #     out = out/x.numel()
         return out
