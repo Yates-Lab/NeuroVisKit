@@ -109,7 +109,7 @@ import NeuroVisKit.utils.regularization as reg
 
 ws = ws0.clone().detach()#[:, :, ::4, ::4, :]
 ws.requires_grad = True
-regpen = reg.local(coefficient=100, target=ws, dims=[2,3], keepdims=0)
+regpen = reg.laplacian(coefficient=1e-2, target=ws, dims=[2,3], keepdims=0)
 
 reg_loss = lambda x: regpen(x)
 
@@ -119,7 +119,7 @@ plot_weights_grad(ws0, ws, grad, cc=0)
 #%%
 ws = ws0.clone().detach()#[:, :, ::4, ::4, :]
 ws.requires_grad = True
-regpen = reg.fourierLocal(coefficient=0.0001, target=ws, dims=[2,3], keepdims=0)
+regpen = reg.fourierLocal(coefficient=1e-3, target=ws, dims=[2,3], keepdims=0)
 
 reg_loss = lambda x: regpen(x)
 
@@ -130,8 +130,8 @@ plot_weights_grad(ws0, ws, grad, cc=0)
 ws = ws0.clone().detach()#[:, :, ::4, ::4, :]
 ws.requires_grad = True
 regpen = reg.Compose(
-    reg.fourierLocal(coefficient=0.0001, target=ws, dims=[2,3], keepdims=0),
-    reg.local(coefficient=100, target=ws, dims=[2,3], keepdims=0)
+    reg.fourierLocal(coefficient=1e-3, target=ws, dims=[2,3], keepdims=0),
+    reg.local(coefficient=1e5, target=ws, dims=[2,3], keepdims=0)
 )
 
 reg_loss = lambda x: regpen(x)
