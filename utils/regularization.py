@@ -1,4 +1,5 @@
 #%%## regularization.py: managing regularization
+from logging import warning
 import torch
 from torch import nn
 from torch.nn.modules.utils import _reverse_repeat_tuple
@@ -7,6 +8,7 @@ import numpy as np
 from functools import reduce
 import inspect
 import math
+import warnings
 
 def extract_reg(module, proximal=False):
     def get_reg_helper(module):
@@ -50,7 +52,7 @@ class Regularization(nn.Module):
         super().__init__()
 
 class ProximalRegularizationModule(Regularization):
-    def __init__(self, coefficient=1, target=None, shape=None, dims=None, keepdims=None, **kwargs):
+    def __init__(self, coefficient=1, lr=1, target=None, shape=None, dims=None, keepdims=None, **kwargs):
         super().__init__()
         assert hasattr(target, 'data'), 'Target must be a tensor with a data attribute. Currently, target is of type: '+str(type(target))
         if isinstance(dims, int):
@@ -61,7 +63,7 @@ class ProximalRegularizationModule(Regularization):
         
         if shape is None and target is not None:
             shape = target.shape
-
+        self.lr = lr
         self.dims = dims
         self.shape = shape
         self.coefficient = coefficient
@@ -197,28 +199,50 @@ class Pnorm(RegularizationModule):
         return out
     
 class ProximalPnorm(ProximalRegularizationModule):
-    def __init__(self, coefficient=1, target=None, p=1, **kwargs):
-        super().__init__(coefficient=coefficient, target=target, **kwargs)
+    def __init__(self, coefficient=1, target=None, p=1, lr=1, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, lr=lr, **kwargs)
         self.p = p
     def proximal(self):
         # Calculate proximal operator for p-norm
+        #grad = norm**(1-p) * abs(x)**(p-1) * torch.sign(x)
+        with torch.no_grad():
+            x = self.target
+            grads = x.norm(self.p, dim=self.dims, keepdim=True)**(1-self.p) * torch.abs(x)**(self.p-1)
+            out = torch.sign(x) * (torch.abs(x) - self.coefficient*grads).clamp(min=0)
+            self.target.data = out
+        return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
+
+class proximalGroupSparsity(ProximalRegularizationModule):
+    def __init__(self, coefficient=1, target=None, lr=1, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, lr=lr, **kwargs)
+        self.p = 2
+    def proximal(self):
         with torch.no_grad():
             x = self.target
             norm = x.norm(self.p, dim=self.dims, keepdim=True)
-            out = x / (norm + 1e-8) * (norm - self.coefficient).clamp(min=0)
+            out = x/norm * (norm - self.coefficient*self.lr).clamp(min=0)
             self.target.data = out
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
     
 class proximalL1(ProximalPnorm):
-    def __init__(self, coefficient=1e-1, target=None, **kwargs):
-        super().__init__(coefficient=coefficient, target=target, p=1, **kwargs)
+    def __init__(self, coefficient=1e-1, target=None, lr=1, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, p=1, lr=lr, **kwargs)
+    def proximal(self):
+        #reimplented for speed in the case of p=1
+        with torch.no_grad():
+            x = self.target
+            out = torch.sign(x) * (torch.abs(x) - self.coefficient*self.lr).clamp(min=0)
+            self.target.data = out
+        return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
+        
 class proximalL2(ProximalPnorm):
-    def __init__(self, coefficient=1e-2, target=None, **kwargs):
-        super().__init__(coefficient=coefficient, target=target, p=2, **kwargs)
-    
+    def __init__(self, coefficient=1e-2, target=None, lr=1, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, p=2, lr=lr, **kwargs)
+
 class l1(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, p=1, **kwargs)
+        
 class l2(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, p=2, **kwargs)
@@ -299,9 +323,9 @@ class local(RegularizationModule):
             pen = pen + temp.sum(1)#gradLessDivide.apply(temp,mat.shape[0])
         return pen.sum()#gradLessDivide.apply(pen.sum(), self.norm)
 
-# class glocal(local):
-#     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
-#         super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
+class glocal(local):
+    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
+        warnings.warn('glocal has been renamed to local. Please use local instead', DeprecationWarning)
         
 class fourierLocal(local):
     def __init__(self, coefficient=1e-3, shape=None, dims=None, keepdims=None, **kwargs):

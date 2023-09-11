@@ -91,6 +91,7 @@ class PytorchWrapper(ModelWrapper):
             self.cids = cids
         self.reg = regularization.extract_reg(self.model, proximal=False)
         self.proximal_reg = regularization.extract_reg(self.model, proximal=True)
+        self._lr = None
         print("initialized", self.reg, self.proximal_reg)
     def compute_reg_loss(self, *args, **kwargs):
         loss = sum([r() for r in self.reg]+[0])
@@ -108,6 +109,15 @@ class PytorchWrapper(ModelWrapper):
             if x.ndim == 4:
                 x = x.unsqueeze(1)
         return self.model(x, *args, **kwargs)
+    @property
+    def lr(self):
+        return self._lr
+    @lr.setter
+    def lr(self, lr):
+        self._lr = lr
+        for i in self.proximal_reg:
+            if hasattr(i, 'lr'):
+                i.lr = lr
 
 def pad_causal(x, layer, kdims=None):
     kdims = kdims if kdims is not None else np.arange(len(layer.kernel_size))
@@ -259,8 +269,8 @@ class DenseReadoutC(nn.Module):
         self.reg = regularization.Compose(
             regularization.local(1e-1, target=self.space, dims=(0, 1), keepdims=2),
             regularization.l2(1e-7, keepdims=-1, target=self.space),
-            # regularization.proximalL1(1e-4, keepdims=-1, target=self.feature),
-            regularization.l1(1e-5, keepdims=-1, target=self.feature)
+            regularization.proximalL1(1e-5, keepdims=-1, target=self.feature),
+            # regularization.l1(1e-5, keepdims=-1, target=self.feature)
         )
     def forward(self, x):
         return torch.einsum('tcxy,cn,xyn->tn',x,self.feature,self.space) + self.bias

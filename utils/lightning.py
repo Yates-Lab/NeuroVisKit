@@ -67,6 +67,8 @@ class PLWrapper(pl.LightningModule):
         self.cids = self.wrapped_model.cids
         self.eval_module = EvalModule(self.loss.unit_loss, self.cids)
         self.save_hyperparameters(ignore=['wrapped_model', 'preprocess_data'])
+        if hasattr(self.wrapped_model, 'lr'):
+            self.wrapped_model.lr = self.learning_rate
         
     def forward(self, x):
         return self.wrapped_model(self.preprocess_data(x))
@@ -78,9 +80,13 @@ class PLWrapper(pl.LightningModule):
     def update_lr(self, lr=None):
         if lr is not None:
             self.learning_rate = lr
-        print(f"Updating learning rate to {self.learning_rate:.5f}")
-        for g in self.opt_instance.param_groups:
-            g['lr'] = self.learning_rate
+            if hasattr(self.wrapped_model, 'lr'):
+                self.wrapped_model.lr = lr
+            print(f"Updating learning rate to {self.learning_rate:.5f}")
+            for g in self.opt_instance.param_groups:
+                g['lr'] = self.learning_rate
+        else:
+            raise ValueError("lr must be specified, yet it is None")
     
     def training_step(self, x, batch_idx=0, dataloader_idx=0):
         x = self.preprocess_data(x)
