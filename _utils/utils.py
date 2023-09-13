@@ -9,6 +9,14 @@ import torch.nn.functional as F
 import dill
 
 def dump(obj, file):
+    #check if the object is a torch module
+    try:
+        if hasattr(obj, 'parameters') and next(obj.parameters()).device != 'cpu':
+            obj.to("cpu")
+        elif hasattr(obj, 'device'):
+            obj = obj.to("cpu")
+    except:
+        print('could not move object to cpu during dump')
     with open(file, 'wb') as f:
         dill.dump(obj, f, byref=False, recurse=True)
         
