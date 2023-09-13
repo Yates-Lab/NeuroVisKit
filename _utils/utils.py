@@ -6,6 +6,15 @@ import torch
 from functools import reduce
 import importlib.util
 import torch.nn.functional as F
+import dill
+
+def dump(obj, file):
+    with open(file, 'wb') as f:
+        dill.dump(obj, f, byref=False, recurse=True)
+        
+def load(file):
+    with open(file, 'rb') as f:
+        return dill.load(f, ignore=True)
 
 def sum_dict_list(dlist):
     dsum = {d: [] for d in dlist[0].keys()}

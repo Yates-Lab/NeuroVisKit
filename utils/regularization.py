@@ -199,8 +199,8 @@ class Pnorm(RegularizationModule):
         return out
     
 class ProximalPnorm(ProximalRegularizationModule):
-    def __init__(self, coefficient=1, target=None, p=1, lr=1, **kwargs):
-        super().__init__(coefficient=coefficient, target=target, lr=lr, **kwargs)
+    def __init__(self, coefficient=1, target=None, p=1, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, **kwargs)
         self.p = p
     def proximal(self):
         # Calculate proximal operator for p-norm
@@ -208,13 +208,13 @@ class ProximalPnorm(ProximalRegularizationModule):
         with torch.no_grad():
             x = self.target
             grads = x.norm(self.p, dim=self.dims, keepdim=True)**(1-self.p) * torch.abs(x)**(self.p-1)
-            out = torch.sign(x) * (torch.abs(x) - self.coefficient*grads).clamp(min=0)
+            out = torch.sign(x) * (torch.abs(x) - self.coefficient*self.lr*grads).clamp(min=0)
             self.target.data = out
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
 
 class proximalGroupSparsity(ProximalRegularizationModule):
-    def __init__(self, coefficient=1, target=None, lr=1, **kwargs):
-        super().__init__(coefficient=coefficient, target=target, lr=lr, **kwargs)
+    def __init__(self, coefficient=1, target=None, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, **kwargs)
         self.p = 2
     def proximal(self):
         with torch.no_grad():
@@ -225,8 +225,8 @@ class proximalGroupSparsity(ProximalRegularizationModule):
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
     
 class proximalL1(ProximalPnorm):
-    def __init__(self, coefficient=1e-1, target=None, lr=1, **kwargs):
-        super().__init__(coefficient=coefficient, target=target, p=1, lr=lr, **kwargs)
+    def __init__(self, coefficient=1e-1, target=None, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, p=1, **kwargs)
     def proximal(self):
         #reimplented for speed in the case of p=1
         with torch.no_grad():
@@ -236,8 +236,8 @@ class proximalL1(ProximalPnorm):
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
         
 class proximalL2(ProximalPnorm):
-    def __init__(self, coefficient=1e-2, target=None, lr=1, **kwargs):
-        super().__init__(coefficient=coefficient, target=target, p=2, lr=lr, **kwargs)
+    def __init__(self, coefficient=1e-2, target=None, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, p=2, **kwargs)
 
 class l1(Pnorm):
     def __init__(self, coefficient=1, **kwargs):
