@@ -119,7 +119,7 @@ class NDNTLossWrapper(nn.Module):
     '''
         Wrap a loss module to allow NDNT functionality
     '''
-    def __init__(self,loss_no_reduction, name):
+    def __init__(self,loss_no_reduction, name, scalable=False):
         super().__init__()
         self.name = name
         self.loss = loss_no_reduction
@@ -127,6 +127,7 @@ class NDNTLossWrapper(nn.Module):
         self.batch_weighting = 0
         self.register_buffer('unit_weights', None)  
         self.register_buffer('av_batch_size', None) 
+        self.scalable = scalable
 
     def set_loss_weighting( self, batch_weighting=None, unit_weighting=None, unit_weights=None, av_batch_size=None ):
         if batch_weighting is not None:
@@ -143,6 +144,8 @@ class NDNTLossWrapper(nn.Module):
             self.av_batch_size = torch.tensor(av_batch_size, dtype=torch.float32)
 
     def forward(self, pred, target, data_filters=None ):        
+        if self.scalable:
+            return (self.loss(pred, target) * data_filters).sum() / pred.shape[0]
         
         unit_weights = torch.ones( pred.shape[1], device=pred.device)
         if self.batch_weighting == 0:  # batch_size
@@ -269,8 +272,8 @@ class ExperimentalNDNTLossWrapper(nn.Module):
         # END PoissonLoss_datafilter.unit_loss
         
 class Poisson(NDNTLossWrapper):
-    def __init__(self):
-        super().__init__(poisson_f, "poisson")
+    def __init__(self, scalable=False):
+        super().__init__(poisson_f, "poisson", scalable=scalable)
     
 LOSS_DICT = {
     'mse': NDNTLossWrapper(mse_f, "mse"),
