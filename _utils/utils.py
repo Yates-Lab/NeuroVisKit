@@ -6,23 +6,6 @@ import torch
 from functools import reduce
 import importlib.util
 import torch.nn.functional as F
-import dill
-
-def dump(obj, file):
-    #check if the object is a torch module
-    try:
-        if hasattr(obj, 'parameters') and next(obj.parameters()).device != 'cpu':
-            obj.to("cpu")
-        elif hasattr(obj, 'device'):
-            obj = obj.to("cpu")
-    except:
-        print('could not move object to cpu during dump')
-    with open(file, 'wb') as f:
-        dill.dump(obj, f, byref=False, recurse=True)
-        
-def load(file):
-    with open(file, 'rb') as f:
-        return dill.load(f, ignore=True)
 
 def sum_dict_list(dlist):
     dsum = {d: [] for d in dlist[0].keys()}

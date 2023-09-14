@@ -12,6 +12,7 @@ from NeuroVisKit.utils.loss import Poisson
 import math
 from tqdm import tqdm
 import moten
+
 # from models.cnns import DenseReadout as DenseReadoutNDNT
 
 class ModelWrapper(nn.Module):
