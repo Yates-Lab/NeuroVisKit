@@ -43,6 +43,9 @@ def _verify_dims(shape, dims):
     out.sort()
     return out
 
+def pseudo_huber(x, delta=1):
+    return delta**2 * (torch.sqrt(1 + (x/delta)**2) - 1)
+
 class Regularization(nn.Module):
     """
     Base class for regularization modules
@@ -339,7 +342,7 @@ class max(Matrix):
             self.register_buffer(f'pen_mat{ind}', v)
     
     def function(self, x):
-        return super().function(x.pow(2))
+        return super().function(pseudo_huber(x))
 
 class local(Matrix):
     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
@@ -352,7 +355,7 @@ class local(Matrix):
         
         # self.f = GradMagnitudeLogger("local")
     def function(self, x):
-        return super().function(x.pow(2))
+        return super().function(pseudo_huber(x))
         
         # w = x**2
         # self.shape = w.shape
