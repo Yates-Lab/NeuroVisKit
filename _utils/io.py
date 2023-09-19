@@ -2,11 +2,11 @@ import dill
 import hashlib
 import inspect
 
-def hash_object_code(obj):
-    return hash_string(inspect.getsource(obj))
+def hash_object_code(obj, hash_algorithm="shake128"):
+    return hash_string(inspect.getsource(obj), hash_algorithm)
 
-def hash_object_file(obj):
-    return hash_file(inspect.getsourcefile(obj))
+def hash_object_file(obj, hash_algorithm="shake128"):
+    return hash_file(inspect.getsourcefile(obj), hash_algorithm)
 
 def hash_string(string, hash_algorithm="sha256"):
     # Create a hash object using the specified algorithm
@@ -14,6 +14,9 @@ def hash_string(string, hash_algorithm="sha256"):
     # Update the hash object with the string
     hasher.update(string.encode('utf-8'))
     # Return the hexadecimal representation of the hash
+    if hash_algorithm == "shake128":
+        return hasher.hexdigest(5)
+    
     return hasher.hexdigest()
     
 def hash_file(filename, hash_algorithm="sha256", buffer_size=65536):
@@ -28,6 +31,9 @@ def hash_file(filename, hash_algorithm="sha256", buffer_size=65536):
                 break
             hasher.update(data)
     # Return the hexadecimal representation of the hash
+    if hash_algorithm == "shake128":
+        return hasher.hexdigest(5)
+    
     return hasher.hexdigest()
 
 def dump(obj, file):
