@@ -65,9 +65,9 @@ def downsample_time(x, ds, flipped=None):
     if flipped is None:
         flipped = False
         if dims > NTold:
-	        # then assume flipped
-	        flipped = True
-	        x = x.T
+            # then assume flipped
+            flipped = True
+            x = x.T
     
     NTnew = np.floor(NTold/ds).astype(int)
     if type(x) is torch.Tensor:

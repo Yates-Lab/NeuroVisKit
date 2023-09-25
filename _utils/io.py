@@ -1,6 +1,7 @@
 import dill
 import hashlib
 import inspect
+from copy import deepcopy
 
 def hash_object_code(obj, hash_algorithm="shake128"):
     return hash_string(inspect.getsource(obj), hash_algorithm)
@@ -37,6 +38,7 @@ def hash_file(filename, hash_algorithm="sha256", buffer_size=65536):
     return hasher.hexdigest()
 
 def dump(obj, file):
+    obj = deepcopy(obj)
     #check if the object is a torch module
     try:
         if hasattr(obj, 'parameters') and next(obj.parameters()).device != 'cpu':

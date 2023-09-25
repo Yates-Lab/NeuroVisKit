@@ -114,7 +114,7 @@ def BlockedDataLoader(dataset, inds=None, batch_size=1):
     sampler = torch.utils.data.sampler.BatchSampler(
                 torch.utils.data.sampler.SubsetRandomSampler(inds),
                 batch_size=batch_size,
-                drop_last=True)
+                drop_last=False)
 
     if dataset[0]['stim'].device.type == 'cuda':
         num_workers = 0

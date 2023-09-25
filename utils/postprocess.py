@@ -17,6 +17,7 @@ from scipy.signal import find_peaks
 import torch.nn as nn
 
 def plot_model_conv(model):
+    f = []
     i = 0
     for module in model.modules():
         # check if convolutional layer
@@ -29,8 +30,10 @@ def plot_model_conv(model):
                 w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize cin xy
             # shape is (cout, cin, x, y)
             titles = ['cout %d'%i for i in range(w.shape[0])]
-            plot_grid(w, titles=titles, suptitle='Layer %d'%i, desc='Layer %d'%i, vmin=-1, vmax=1)
+            ft = plot_grid(w, titles=titles, suptitle='Layer %d'%i, desc='Layer %d'%i, vmin=-1, vmax=1)
             i += 1
+            f.append(ft)
+    return f
             
 class Loader():
     def __init__(self, ds, cyclic=True, shuffled=False):

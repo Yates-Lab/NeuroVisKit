@@ -6,6 +6,46 @@ import torch
 from functools import reduce
 import importlib.util
 import torch.nn.functional as F
+import subprocess as sp
+import os
+import platform
+
+# def assess_tensors_in_memory():
+#     def recursive_tensor_memory(dict_to_recurse):
+#         if isinstance(dict_to_recurse, dict):
+#             [recursive_tensor_memory(v) for v in dict_to_recurse.values()]
+#         elif isinstance(dict_to_recurse, list):
+#             [recursive_tensor_memory(v) for v in dict_to_recurse]
+#         elif isinstance(dict_to_recurse, torch.Tensor):
+#             print(dict_to_recurse.element_size() * dict_to_recurse.nelement() / 1e9)
+#     recursive_tensor_memory(globals().copy())
+    # for k, v in globals().copy().items():
+    #     if issubclass(type(v), torch.Tensor):
+    #         print(k, v.element_size() * v.nelement() / 1e9, 'GB', v.device)
+
+def auto_device():
+    if platform.system().lower() == 'darwin':
+        return 'mps'
+    memories = get_gpu_memory()
+    best = np.argmax(memories)
+    if memories[best] > 5000:
+        print(f'Using GPU {best} with {memories[best]} MB of free memory')
+        return torch.device(f'cuda:{best}')
+    else:
+        raise ValueError(f'No GPU with more than 5000 MB of free memory found. Free memory: {memories}')
+    
+def get_device_fancy(device):
+    if isinstance(device, str):
+        if device.lower() == 'auto':
+            return auto_device()
+        device = torch.device(device)
+    return device
+
+def get_gpu_memory():
+    command = "nvidia-smi --query-gpu=memory.free --format=csv"
+    memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
+    memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+    return memory_free_values
 
 def sum_dict_list(dlist):
     dsum = {d: [] for d in dlist[0].keys()}

@@ -47,6 +47,11 @@ class EvalModule:
         assert type(self.llsum) is not int, "EvalModule has not been called yet"
         assert type(self.tsum) is not int, "EvalModule has not been called yet"
         assert type(self.rsum) is not int, "EvalModule has not been called yet"
+        zeros = torch.where((self.rsum == 0))[0].tolist() #check for zeros
+        if zeros:
+            print(f"(ignore if just sanity checking) no spikes detected for neurons {zeros}. Check your cids, data and datafilters.")
+            self.reset()
+            return torch.tensor(0)
         LLneuron = self.llsum/self.rsum.clamp(1)
         rbar = self.rsum/self.tsum.clamp(1)
         LLnulls = torch.log(rbar)-1
@@ -119,6 +124,12 @@ class PLWrapper(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         if self.opt != torch.optim.LBFGS:
             self.log("val_loss", -1*self.eval_module.closure().mean(), prog_bar=True, on_epoch=True)
+        with torch.no_grad():
+            self._logging()
+    
+    def _logging(self):
+        if hasattr(self.model, 'logging'):
+            self.model.logging(self)
         
     @property
     def loss(self):

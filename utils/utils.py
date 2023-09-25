@@ -219,6 +219,122 @@ def plot_transients(model, val_data, stimid=0, maxsamples=120, device=None):
 
     return sta_true, sta_hat, fig
 
+def dot_along_axis_f(axis=-1):
+    return torch.vmap(lambda x, y: torch.dot(x, y), in_dims=(axis, axis))
+
+def event_triggered_op(covariate, events, range, inds=None, reduction=torch.mean):
+    # covariate is (time, *any_shape)
+    # events is (time, <optional channels>) binary signal or (n_events,) indices
+    # range is (-time before event, time after event) non exclusive (i.e. arange(range[0], range[1]))
+    # reduction is a function that takes in dim as keyword argument
+    # returns (<optional channels>, range, *any_shape) where <optional channels> defaults to 1
+    cov_ndims, events_ndims = covariate.ndim-1, events.ndim-1
+    if len(events) < covariate.shape[0]:
+        events = torch.zeros(covariate.shape[0], dtype=torch.bool, device=events.device).scatter_(0, events, True)
+    if covariate.ndim == 1:
+        covariate = covariate.unsqueeze(1)
+    assert len(events) > 0, "No events found"
+    NT, sz = covariate.shape[0], list(covariate.shape[1:])
+    NC = 1 if events.ndim == 1 else events.shape[1] # number of channels
+    events = events.reshape(-1, NC)
+    et = torch.zeros( [NC] + [range[1]-range[0]] + sz, dtype=torch.float32, device=covariate.device)
+    inds = torch.arange(NT, device=et.device) if inds is None else inds
+    for i,lag in enumerate(torch.arange(range[0], range[1])):
+        # print('Computing ETO for lag %d' %lag)
+        ix = inds[(inds+lag >= 0) & (inds+lag < NT)]  
+        n_events = len(ix)   
+        c, e = covariate[ix,...], events[ix+lag,...] # shapes (n_events, *any_shape), (n_events, <optional channels>)
+        new_shapeC, new_shapeE = [n_events, 1, *sz], [n_events, NC, 1]
+        et[:, i, ...] = reduction(c.reshape(new_shapeC) * e.reshape(new_shapeE), dim=0)
+    if cov_ndims == 0:
+        et = et.squeeze(-1)
+    if events_ndims == 0:
+        et = et.squeeze(0)
+    return et
+
+def model_device(model):
+    return next(model.parameters()).device
+
+def dl_device(dl):
+    batch = next(iter(dl))
+    if isinstance(batch, dict):
+        return batch.values().__iter__().__next__().device
+    return batch[0].device
+
+def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True):
+    assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
+    assert issubclass(type(model), nn.Module), "model must be a nn.Module"
+    assert len(cids) > 0, "cids must be a list of channel ids"
+    assert len(bins) == 2, "bins must be a tuple of length 2"
+    # assert model_device(model) == dl_device(val_dl), "Model and data must be on same device"
+    assert hasattr(val_dl.dataset, 'covariates'), "val_dl.dataset must have covariates"
+    device = model_device(model)
+    N = sum([len(batch['sac_on']) for batch in val_dl])
+    sac_on = torch.zeros((N, 1), dtype=torch.bool, device=device)
+    Y = torch.zeros(N, len(cids), dtype=torch.float32, device=device)
+    Y_hat = torch.zeros(N, len(cids), dtype=torch.float32, device=device)
+    with torch.no_grad():
+        i = 0
+        for batch in tqdm(val_dl, desc="Preparing for transient computation."):
+            b = len(batch['stim'])
+            for k in batch.keys():
+                batch[k] = batch[k].to(device)
+            sac_on[i:i+b] = batch['sac_on']
+            Y[i:i+b] = batch['robs'][:, cids]
+            Y_hat[i:i+b] = model(batch)
+            if filter:
+                Y[i:i+b] *= batch['dfs'][:, cids]
+            i += b
+    inds = torch.where(sac_on)[0].to(device)
+    del sac_on
+    transientY = event_triggered_op(Y, inds, bins, reduction=torch.mean).cpu()
+    del Y
+    transientY_hat = event_triggered_op(Y_hat, inds, bins, reduction=torch.mean).cpu()
+    NC = transientY.shape[-1]
+    sx = int(np.ceil(np.sqrt(NC)))
+    sy = int(np.round(np.sqrt(NC)))
+   
+    f = plt.figure(figsize=(3*sx, 3*sy))
+    for cc in range(NC):
+        plt.subplot(sx,sy,cc+1)
+        plt.plot(transientY[:, cc], 'k')
+        plt.plot(transientY_hat[:, cc], 'r')
+        plt.xlim(*bins)
+        plt.axis('tight')
+        plt.axis('off')
+        plt.title(cids[cc])
+    plt.tight_layout()
+    return transientY, transientY_hat, f
+    
+
+# def plot_transientsC(model, test_ds, cids, num_lags):
+#     inds = torch.where(test_ds.covariates['sac_on'])[0].cpu().numpy()
+#     N = len(inds)
+
+#     Y = test_ds.covariates['robs']
+#     bins = np.arange(-100, 150, 1)
+#     Ndim = list(Y.shape[1:])
+#     NT = Y.shape[0]
+
+#     binnedY = np.nan*np.zeros([N] + [len(bins)] + Ndim)
+#     good = np.zeros(N, dtype=bool)
+
+#     from tqdm import tqdm
+#     for i in tqdm(range(N)):
+#         ii = inds[i] + bins
+#         if np.min(ii) < 0 or np.max(ii) >= NT:
+#             continue
+        
+#         good[i] = True
+#         binnedY[i,...] = Y[ii,...].detach().cpu().numpy()
+
+#     binnedY = binnedY[good,...]
+
+#     plt.figure()
+#     _ = plt.plot(bins, np.mean(binnedY, axis=0))
+#     plt.xlabel("Time from saccade onset (ms)")
+
+
 def plot_transientsC(model, val_dl, cids, num_lags):
     # val_dl must have batch size 1 and ds must have use_blocks = False
     Nfix = len(val_dl)
@@ -241,7 +357,7 @@ def plot_transientsC(model, val_dl, cids, num_lags):
         rsta[i,start:nt,:] = batch['robs'][start:nt,cids].cpu()
         rhat[i,start:nt,:] = yhat[start:nt,:].detach().cpu().numpy()
         del batch
-        
+    
     sx = int(np.ceil(np.sqrt(NC)))
     sy = int(np.round(np.sqrt(NC)))
 

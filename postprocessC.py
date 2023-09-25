@@ -25,7 +25,7 @@ from NeuroVisKit.utils.datasets.fixation import FixationMultiDataset
 from matplotlib.animation import FuncAnimation
 from NeuroVisKit.utils.mei import irfC
 import matplotlib.animation as animation
-#%%
+#%% 
 seed_everything(0)
 
 config = {
