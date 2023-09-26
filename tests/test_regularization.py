@@ -6,6 +6,7 @@ It compares them against the NDNT implementation
 #%%
 #!%load_ext autoreload
 #!%autoreload 2
+from tabnanny import verbose
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -65,7 +66,7 @@ def run_reg(ws, reg, alpha=0.1, nsteps=100, verbose=True, proximal=False):
     for i in range(nsteps):
         ws, grad, pen = step_reg(ws, reg, alpha, proximal=proximal)
         if verbose:
-            print("type:", reg.__name__, "step: ", i, "penalty: ", pen.item())
+            print("type:", type(reg).__name__, "step: ", i, "penalty: ", pen.item())
     return ws, grad
 
 def plot_weights_grad(ws0, ws, grad, cc=0):
@@ -106,36 +107,42 @@ for i in range(NC):
     plt.axis('off')
 
 
-ws = gabor_filters.clone().unsqueeze(1)
+ws = gabor_filters.clone().detach().unsqueeze(1)[..., dim[-1]//2-1:dim[-1]//2+1]
 print("weights shape: ", ws.shape)
 
-ws0 = ws.clone()
+ws0 = ws.clone().detach()
 ws.requires_grad = True
-
-#%%
-
-
 
 # %% test foundation regularization (glocalx)
 import NeuroVisKit.utils.regularization as reg
 import time
 regs = reg.get_regs_dict()
 print("detected regs: ", regs.keys())
-nsteps = 450
+nsteps = 1
+targets = []#["localDekel", "localDekelOld"]
+preg = 1e-1
+verbose = True
+pproximal = 1e-1
 for k, v in regs.items():
-    ws = ws0.clone().detach()
-    regpen = v(target=ws, dims=[2,3], keepdims=0)
-    stime = time.time()
-    if regpen._parent_class.__name__ == "RegularizationModule":
-        ws, grad = run_reg(ws, regpen, alpha=1e-1, nsteps=nsteps, proximal=False)
-    elif regpen._parent_class.__name__ == "ProximalRegularizationModule":
-        ws, grad = run_reg(ws, regpen, alpha=1, nsteps=nsteps, proximal=True)
-    stime = (time.time() - stime)/nsteps
-    plot_weights_grad(ws0, ws, grad, cc=0)
-    plt.gcf().suptitle(f"{k} ({stime:.2f} s/step)")
-    plt.gcf().tight_layout()
-    plt.show()
-    del ws, regpen, grad
+    if targets and k not in targets:
+        continue
+    try:
+        ws = ws0.detach()
+        regpen = v(target=ws, dims=[2,3], keepdims=0)
+        stime = time.time()
+        if regpen._parent_class.__name__ == "RegularizationModule":
+            ws, grad = run_reg(ws, regpen, alpha=preg, nsteps=nsteps, proximal=False, verbose=verbose)
+        elif regpen._parent_class.__name__ == "ProximalRegularizationModule":
+            ws, grad = run_reg(ws, regpen, alpha=pproximal, nsteps=nsteps, proximal=True, verbose=verbose)
+        stime = (time.time() - stime)/nsteps
+        plot_weights_grad(ws0, ws, grad, cc=0)
+        plt.gcf().suptitle(f"{k} ({stime:.2f} s/step)")
+        plt.gcf().tight_layout()
+        plt.show()
+        del ws, regpen, grad
+    except Exception as e:
+        print("failed on: ", k, e)
+        continue
         
 #%%
 # ws = ws0.clone().detach()
