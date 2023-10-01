@@ -453,3 +453,20 @@ def show_stim_movie(stim, path="stim_video.mp4", fps=30, normalizing_constant=No
     writer.close()
     w, h = stim.shape[1:]
     return Video("test.mp4", embed=True, width=w*3, height=h*3)
+
+# Function to create a Gaussian kernel
+def gaussian_kernel_1D(size: int, std: float):
+    """Creates a 1D Gaussian kernel using the given size and standard deviation."""
+    values = torch.arange(-size // 2 + 1., size // 2 + 1.)
+    gauss_kernel = torch.exp(-values**2 / (2 * std**2))
+    gauss_kernel = gauss_kernel / gauss_kernel.sum()
+    return gauss_kernel
+
+def gaussian_kernel_2D(size: int, std: float, channels: int):
+    """Creates a 2D Gaussian kernel with the given size and standard deviation."""
+    x = torch.linspace(-(size // 2), size // 2, steps=size)
+    xx,yy = torch.meshgrid(x,x)
+    gauss_kernel = torch.exp(-(xx**2 + yy**2) / (2 * std**2))
+    gauss_kernel = gauss_kernel / gauss_kernel.sum()
+    kernel = gauss_kernel.expand(1, channels, size, size)
+    return kernel
