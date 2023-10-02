@@ -36,6 +36,8 @@ def get_regs_dict():
 def _verify_dims(shape, dims):
     if dims is None:
         return list(range(len(shape)))
+    elif isinstance(dims, int):
+        dims = [dims]
     if shape is None:
         print('Warning: shape is None, cannot verify dims')
         return dims
@@ -663,6 +665,8 @@ class laplacian(Convolutional):
                 dims = [i for i in range(len(kwargs['shape']))]
             elif 'target' in kwargs:
                 dims = [i for i in range(len(kwargs['target'].shape))]
+        elif isinstance(dims, int):
+            dims = [dims]
         if len(dims) == 1:
             kernel = torch.tensor([1.,-2.,1.], dtype=torch.float32)
         elif len(dims) == 2:
