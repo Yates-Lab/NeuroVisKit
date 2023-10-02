@@ -331,7 +331,7 @@ class l4(Pnorm):
 
 # class 
 
-class MatrixDekel(RegularizationModule):
+class Matrix(RegularizationModule):
     '''
     super class for applying a Matrix penalty to each targeted dimension
 
@@ -364,46 +364,6 @@ class MatrixDekel(RegularizationModule):
             pen = pen + temp
         return pen.sum()
 
-class Matrix(RegularizationModule):
-    '''
-    super class for applying a Matrix penalty to each targeted dimension
-
-    '''
-    
-    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
-        super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
-        assert self.shape is not None, 'Must specify expected shape of item to be penalized'
-        self.dims = _verify_dims(self.shape, dims)
-        self.leftover_dims = [i for i in range(len(self.shape)) if i not in self.dims and i not in self.keepdims]
-        self.norm = np.mean([self.shape[i] for i in self.dims])#np.prod([self.shape[i] for i in self.dims])**(1/len(self.dims))
-
-    def function(self, w):
-        self.shape = w.shape
-        w = w.permute(*self.dims, *self.leftover_dims, *self.keepdims)
-        w = w.reshape(
-            *[self.shape[i] for i in self.dims],
-            -1,
-            np.prod([self.shape[i] for i in self.keepdims], dtype=int),
-        )
-        pen = 0
-        for ind, dim in enumerate(self.dims):
-            # get the regularization Matrix
-            mat = getattr(self, f'pen_mat{dim}') # shape = (i,i)
-            # permute targeted dim to the end
-            relevant_permute_dims = list(range(len(w.shape)))
-            relevant_permute_dims.remove(ind)
-            w_permuted = w.permute(*relevant_permute_dims, ind)
-            w_permuted = w_permuted.reshape(-1, *w_permuted.shape[-2:])
-            # reshape while keeping he channel dimension intact
-            w_permuted = w_permuted.sum(0) #sum over leftover dims
-            
-            # quadratic form: W^T M W
-            temp = w_permuted @ mat
-            temp = temp * w_permuted
-
-            pen = pen + temp.sum(1)#gradLessDivide.apply(temp,mat.shape[0])
-        return pen.sum()#gradLessDivide.apply(pen.sum(), self.norm)
-
 class max(Matrix):
     '''
     Dan's "max" penalty. Goal: sparsity
@@ -424,7 +384,8 @@ class max(Matrix):
     
     def function(self, x):
         return super().function(pseudo_huber(x))
-class localDekel(MatrixDekel):
+
+class local(Matrix):
     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
         super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
         
@@ -436,82 +397,6 @@ class localDekel(MatrixDekel):
         # self.f = GradMagnitudeLogger("local")
     def function(self, x):
         return super().function(pseudo_huber(x))
-# class localDekelOld(RegularizationModule):
-#     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
-#         super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
-#         assert self.shape is not None, 'Must specify expected shape of item to be penalized'
-#         self.dims = _verify_dims(self.shape, dims)
-#         self.leftover_dims = [i for i in range(len(self.shape)) if i not in self.dims and i not in self.keepdims]
-#         self.norm = np.mean([self.shape[i] for i in self.dims])#np.prod([self.shape[i] for i in self.dims])**(1/len(self.dims))
-#         for ind in self.dims:
-#             i = self.shape[ind]
-#             v = ((torch.arange(i)-torch.arange(i)[:,None])**2).float()/i**2 # shape = (i,j)
-#             self.register_buffer(f'local_pen{ind}', v)
-        
-#         # self.f = GradMagnitudeLogger("local")
-#     def function(self, x):
-#         w = x**2
-#         self.shape = w.shape
-#         w = w.permute(*self.dims, *self.leftover_dims, *self.keepdims)
-#         w = w.reshape(
-#             *[self.shape[i] for i in self.dims],
-#             -1,
-#             np.prod([self.shape[i] for i in self.keepdims], dtype=int),
-#         )
-#         pen = 0
-#         for ind, dim in enumerate(self.dims):
-#             # get the regularization matrix
-#             mat = getattr(self, f'local_pen{dim}') # shape = (i,j)
-#             # permute targeted dim to the end
-#             relevant_permute_dims = list(range(len(w.shape)))
-#             relevant_permute_dims.remove(ind)
-#             w_permuted = w.permute(*relevant_permute_dims, ind)
-#             w_permuted = w_permuted.reshape(-1, *w_permuted.shape[-2:])
-#             temp = torch.einsum('bnd, id, di->n', w_permuted, mat, mat)
-#             pen = pen + temp
-#         return pen.sum()
-
-class local(Matrix):
-    def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
-        super().__init__(coefficient=coefficient, shape=shape, dims=dims, keepdims=keepdims, **kwargs)
-        
-        for ind in self.dims:
-            i = self.shape[ind]
-            v = ((torch.arange(i)-torch.arange(i)[:,None])**2).float()/i**2 # shape = (i,j)
-            self.register_buffer(f'pen_mat{ind}', v)
-        
-        self.f = GradMagnitudeLogger("local")
-    def function(self, x):
-        return super().function(pseudo_huber(x))
-        
-        # w = x**2
-        # self.shape = w.shape
-        # w = w.permute(*self.dims, *self.leftover_dims, *self.keepdims)
-        # w = w.reshape(
-        #     *[self.shape[i] for i in self.dims],
-        #     -1,
-        #     np.prod([self.shape[i] for i in self.keepdims], dtype=int),
-        # )
-        # pen = 0
-        # for ind, dim in enumerate(self.dims):
-        #     # get the regularization matrix
-        #     mat = getattr(self, f'local_pen{dim}') # shape = (i,j)
-        #     # permute targeted dim to the end
-        #     relevant_permute_dims = list(range(len(w.shape)))
-        #     relevant_permute_dims.remove(ind)
-        #     w_permuted = w.permute(*relevant_permute_dims, ind)
-        #     w_permuted = w_permuted.reshape(-1, *w_permuted.shape[-2:])
-        #     # reshape while keeping he channel dimension intact
-        #     w_permuted = w_permuted.sum(0) #sum over leftover dims
-        #     # w_permuted = gradLessDivide.apply(w_permuted.sum(0), w_permuted.shape[0])
-        #     ## quadratic form: W^T M W
-        #     temp = w_permuted @ mat
-        #     temp = temp * w_permuted
-        #     # temp = temp.sum(1)
-        #     # temp = gradLessDivide.apply(temp.sum(1), temp.shape[1])
-        #     # norm = w.shape[ind]*w.shape[-2]
-        #     pen = pen + temp.sum(1)#gradLessDivide.apply(temp,mat.shape[0])
-        # return pen.sum()#gradLessDivide.apply(pen.sum(), self.norm)
 
 class glocal(local):
     def __init__(self, coefficient=1, shape=None, dims=None, keepdims=None, **kwargs):
