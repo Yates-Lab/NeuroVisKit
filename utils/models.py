@@ -120,6 +120,44 @@ class PytorchWrapper(ModelWrapper):
             if hasattr(i, 'lr'):
                 i.lr = lr
 
+class RobsAugmenter(PytorchWrapper):
+
+    def __init__(self, model, *args, gaussian_kernel_size=5, gaussian_kernel_sigma=1, l1=0, l2=0, **kwargs):
+
+        super().__init__(model, *args, **kwargs)
+
+        self.kernel_size = gaussian_kernel_size
+        self.kernel_sigma = gaussian_kernel_sigma
+        self.l1 = l1
+        self.l2 = l2
+
+        self.register_buffer('kernel', utils.gaussian_kernel_1D(gaussian_kernel_size, gaussian_kernel_sigma).unsqueeze(0).unsqueeze(0))
+
+    def training_step(self, batch, batch_idx=None):  # batch_indx not used, right?
+        
+        
+        y = batch['robs'][:,self.cids]
+        if self.training:
+            ysmooth = F.conv1d(y.T.unsqueeze(1), self.kernel, padding=self.kernel_size//2).squeeze().T
+            # y = torch.poisson(ysmooth).detach()
+            y = ysmooth.detach() # < torch.rand_like(ysmooth)
+        
+        y_hat = self(batch)
+
+        if 'dfs' in batch.keys():
+            dfs = batch['dfs'][:,self.cids]
+            loss = self.loss(y_hat, y, dfs)
+        else:
+            loss = self.loss(y_hat, y)
+
+        regularizers = self.compute_reg_loss()
+        if self.l1:
+            regularizers = regularizers + self.l1*torch.abs(y_hat).mean()
+        if self.l2:
+            regularizers = regularizers + self.l2*(y_hat**2).mean()
+
+        return {'loss': loss + regularizers, 'train_loss': loss, 'reg_loss': regularizers}
+
 def pad_causal(x, layer, kdims=None):
     kdims = kdims if kdims is not None else np.arange(len(layer.kernel_size))
     pad_array = []

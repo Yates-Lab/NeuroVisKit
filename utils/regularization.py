@@ -18,9 +18,12 @@ def extract_reg(module, proximal=False):
             if hasattr(current_module, '_parent_class'): # critical for extract_reg to work when importing from different paths
                 isproximal = issubclass(current_module._parent_class, ProximalRegularizationModule)
                 isregmodule = issubclass(current_module._parent_class, RegularizationModule)
+                isactivity = issubclass(current_module._parent_class, ActivityRegularization)
                 if isproximal or isregmodule:
                     if proximal == isproximal:
                         out_modules.append(current_module)
+                if isactivity:
+                    out_modules.append(current_module)
             elif issubclass(type(current_module), nn.Module):
                 out_modules += get_reg_helper(current_module)
         return out_modules
@@ -130,6 +133,46 @@ class RegularizationModule(Regularization):
 
     def log(self, x):
         return gradMagLog.apply(x, self.__class__.__name__)
+    
+class ActivityRegularization(Regularization):
+
+    def __init__(self, module, coefficient=1, **kwargs):
+
+        super().__init__()
+        self.coefficient = coefficient
+
+        self.module = module
+        self.register_buffer('activations', torch.tensor(0.0))
+        self._parent_class = ActivityRegularization # critical for extract_reg to work when importing from different paths
+
+        def get_activation(module, input, output):
+            self.activations = output
+            return output
+        
+        module.register_forward_hook(get_activation)
+
+    def function(self, *args):
+        raise NotImplementedError
+    
+    def forward(self):
+        return self.function() * self.coefficient
+    
+class ActivityL1(ActivityRegularization):
+
+    def __init__(self, module, coefficient=1, **kwargs):
+        super().__init__(module, coefficient=coefficient, **kwargs)
+
+    def function(self, *args):
+        return self.activations.abs().mean()
+    
+class ActivityL2(ActivityRegularization):
+
+    def __init__(self, module, coefficient=1, **kwargs):
+        super().__init__(module, coefficient=coefficient, **kwargs)
+
+    def function(self, *args):
+        return self.activations.pow(2).mean()
+        
         
 class Compose(Regularization): #@TODO change to module list or remove entirely
     def __init__(self, *RegModules):
@@ -192,11 +235,11 @@ class GradMagnitudeLogger(nn.Module):
 class Pnorm(RegularizationModule):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, **kwargs)
-        self.p = kwargs.get('p', 2)
+        self.register_buffer('p', torch.tensor(kwargs.get('p', 2)))
         # self.f = GradMagnitudeLogger("l"+str(self.p))
     def function(self, x):
         # x = self.f(x)
-        out = (torch.abs(x)**self.p).sum()
+        out = (torch.abs(x).pow(self.p)).sum()
 
         # out = gradLessDivide.apply(out, x.numel())
         # out = gradLessPower.apply(out, 1/self.p)
@@ -285,6 +328,8 @@ class l4(Pnorm):
 #     def __init__(self, coefficient=1, **kwargs):
 #         super().__init__(coefficient=coefficient, **kwargs)
 #         self.p = 2
+
+# class 
 
 class MatrixDekel(RegularizationModule):
     '''
