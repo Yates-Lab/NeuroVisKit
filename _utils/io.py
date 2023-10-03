@@ -45,6 +45,8 @@ def dump(obj, file):
     try:
         if hasattr(obj, 'parameters') and next(obj.parameters()).device != 'cpu':
             obj.to("cpu")
+        elif hasattr(obj, 'buffers') and next(obj.buffers()).device != 'cpu':
+            obj.to("cpu")
         elif hasattr(obj, 'device'):
             obj = obj.to("cpu")
     except:
