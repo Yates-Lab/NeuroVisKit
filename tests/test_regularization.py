@@ -118,8 +118,8 @@ import NeuroVisKit.utils.regularization as reg
 import time
 regs = reg.get_regs_dict()
 print("detected regs: ", regs.keys())
-nsteps = 1
-targets = []#["localDekel", "localDekelOld"]
+nsteps = 1000
+targets = []#["center", "centerDekel"]
 preg = 1e-1
 verbose = True
 pproximal = 1e-1

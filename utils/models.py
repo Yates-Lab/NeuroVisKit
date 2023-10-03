@@ -55,20 +55,23 @@ class ModelWrapper(nn.Module):
 
         return self.model(batch)
 
-    def training_step(self, batch, batch_idx=None):  # batch_indx not used, right?
+    def training_step(self, batch, batch_idx=None, alternative_loss_fn=None):  # batch_indx not used, right?
         
         y = batch['robs'][:,self.cids]
         y_hat = self(batch)
 
-        if 'dfs' in batch.keys():
-            dfs = batch['dfs'][:,self.cids]
-            loss = self.loss(y_hat, y, dfs)
+        if alternative_loss_fn is None:
+            if 'dfs' in batch.keys():
+                dfs = batch['dfs'][:,self.cids]
+                loss = self.loss(y_hat, y, dfs)
+            else:
+                loss = self.loss(y_hat, y)
         else:
-            loss = self.loss(y_hat, y)
+            loss = alternative_loss_fn(y_hat, batch)
 
         regularizers = self.compute_reg_loss()
 
-        return {'loss': loss + regularizers, 'train_loss': loss, 'reg_loss': regularizers}
+        return {'loss': loss.sum() + regularizers, 'train_loss': loss.mean(), 'reg_loss': regularizers}
 
     def validation_step(self, batch, batch_idx=None):
         
