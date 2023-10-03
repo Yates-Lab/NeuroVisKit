@@ -76,7 +76,8 @@ class TrainEvalModule(nn.Module):
         for b in tqdm.tqdm(train_dataloader, desc="Preparing normalization for loss."):
             count = count + b["dfs"][:, self.cids].sum(dim=0)
             sum_spikes = sum_spikes + (b["dfs"][:, self.cids]*b["robs"][:, self.cids]).sum(dim=0)
-        self.register_buffer("mean_spikes", sum_spikes/count.clamp(1))
+        assert all(count > 1), "Some neurons have no data. Check your cids, data and datafilters."
+        self.register_buffer("mean_spikes", sum_spikes/count)
     def __call__(self, rpred, batch):
         llsum = self.loss(
             rpred,
@@ -84,13 +85,24 @@ class TrainEvalModule(nn.Module):
             data_filters=batch["dfs"][:, self.cids],
             temporal_normalize=False
         )
-        spike_sum = (batch["dfs"][:, self.cids]*batch["robs"][:, self.cids]).sum(dim=0)
-        LLneuron = llsum/spike_sum.clamp(1)
-        LLnulls = torch.log(self.mean_spikes)-1
-        device = spike_sum.device
-        LLneuron = -LLneuron.to(device) - LLnulls.to(device)
+
+        llnull = self.loss(
+            self.mean_spikes.repeat(len(batch["robs"]), 1),
+            batch["robs"][:, self.cids],
+            data_filters=batch["dfs"][:, self.cids],
+            temporal_normalize=False
+        )
+
+        robs = batch["robs"][:, self.cids] * batch["dfs"][:, self.cids]
+        LLneuron = (llsum - llnull)/robs.sum(0).clamp(1)
+
+        # spike_sum = (batch["dfs"][:, self.cids]*batch["robs"][:, self.cids]).sum(dim=0)
+        # LLneuron = llsum/spike_sum.clamp(1)
+        # LLnulls = torch.log(self.mean_spikes)-1
+        # device = spike_sum.device
+        # LLneuron = -LLneuron.to(device) - LLnulls.to(device)
         LLneuron/=np.log(2)
-        return -LLneuron
+        return LLneuron
     
 class PLWrapper(pl.LightningModule):
     def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=PreprocessFunction(), normalize_loss=True):
