@@ -106,7 +106,7 @@ class TrainEvalModule(nn.Module):
         return LLneuron
     
 class PLWrapper(pl.LightningModule):
-    def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=PreprocessFunction(), normalize_loss=True):
+    def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=PreprocessFunction(), normalize_loss=False):
         super().__init__()
         self.wrapped_model = wrapped_model
         self.model = wrapped_model.model
@@ -144,6 +144,8 @@ class PLWrapper(pl.LightningModule):
     def on_train_start(self):
         if hasattr(self, 'train_eval_module'):
             self.train_eval_module.start(self.trainer.train_dataloader)
+        if hasattr(self.model, 'on_train_start'):
+            self.model.on_train_start(self)
         return super().on_train_start()
     
     def training_step(self, x, batch_idx=0, dataloader_idx=0):
