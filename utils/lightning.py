@@ -1,4 +1,5 @@
 import os, dill, sys, shutil, json, io, contextlib
+import re
 from typing import Any, Callable, Optional, Union
 from lightning.pytorch.core.optimizer import LightningOptimizer
 import torch
@@ -8,6 +9,8 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler, Dataset
 import lightning as pl
 from lightning.pytorch.callbacks import LearningRateFinder
+import tqdm
+from zmq import has
 from NeuroVisKit._utils.lightning import PreprocessFunction
 from NeuroVisKit._utils.utils import get_module_dict, import_module_by_path, sum_dict_list
 import math
@@ -59,8 +62,38 @@ class EvalModule:
         LLneuron/=np.log(2)
         return LLneuron
 
+class TrainEvalModule(nn.Module):
+    """Module that evaluates the log-likelihood of a model on a given dataset.
+    This is used for training.
+    """
+    def __init__(self, unit_loss, cids):
+        super().__init__()
+        self.loss = unit_loss
+        self.cids = cids
+    def start(self, train_dataloader):
+        self.train_dataloader = train_dataloader
+        sum_spikes, count = 0, 0
+        for b in tqdm.tqdm(train_dataloader, desc="Preparing normalization for loss."):
+            count = count + b["dfs"][:, self.cids].sum(dim=0)
+            sum_spikes = sum_spikes + (b["dfs"][:, self.cids]*b["robs"][:, self.cids]).sum(dim=0)
+        self.register_buffer("mean_spikes", sum_spikes/count.clamp(1))
+    def __call__(self, rpred, batch):
+        llsum = self.loss(
+            rpred,
+            batch["robs"][:, self.cids],
+            data_filters=batch["dfs"][:, self.cids],
+            temporal_normalize=False
+        )
+        spike_sum = (batch["dfs"][:, self.cids]*batch["robs"][:, self.cids]).sum(dim=0)
+        LLneuron = llsum/spike_sum.clamp(1)
+        LLnulls = torch.log(self.mean_spikes)-1
+        device = spike_sum.device
+        LLneuron = -LLneuron.to(device) - LLnulls.to(device)
+        LLneuron/=np.log(2)
+        return -LLneuron
+    
 class PLWrapper(pl.LightningModule):
-    def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=PreprocessFunction()):
+    def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=PreprocessFunction(), normalize_loss=True):
         super().__init__()
         self.wrapped_model = wrapped_model
         self.model = wrapped_model.model
@@ -71,6 +104,8 @@ class PLWrapper(pl.LightningModule):
         assert hasattr(self.wrapped_model, 'cids'), "model must have cids attribute"
         self.cids = self.wrapped_model.cids
         self.eval_module = EvalModule(self.loss.unit_loss, self.cids)
+        if normalize_loss:
+            self.train_eval_module = TrainEvalModule(self.loss.unit_loss, self.cids)
         self.save_hyperparameters(ignore=['wrapped_model', 'preprocess_data'])
         if hasattr(self.wrapped_model, 'lr'):
             self.wrapped_model.lr = self.learning_rate
@@ -93,9 +128,17 @@ class PLWrapper(pl.LightningModule):
         else:
             raise ValueError("lr must be specified, yet it is None")
     
+    def on_train_epoch_start(self):
+        if hasattr(self, 'train_eval_module'):
+            self.train_eval_module.start(self.trainer.train_dataloader)
+        return super().on_train_epoch_start()
+    
     def training_step(self, x, batch_idx=0, dataloader_idx=0):
         x = self.preprocess_data(x)
-        losses = self.wrapped_model.training_step(x)
+        if hasattr(self, 'train_eval_module'):
+            losses = self.wrapped_model.training_step(x, alternative_loss_fn=self.train_eval_module)
+        else:
+            losses = self.wrapped_model.training_step(x)
         self.log("train_loss", losses['train_loss'], prog_bar=True, on_epoch=True, batch_size=len(x["stim"]), on_step=True)
         if "reg_loss" in losses.keys():
             self.log("reg_loss", losses['reg_loss'], prog_bar=True, on_step=True, batch_size=len(x["stim"]))
