@@ -1,6 +1,8 @@
 import dill
 import hashlib
 import inspect
+import torch
+import io
 from copy import deepcopy
 
 def hash_object_code(obj, hash_algorithm="shake128"):
@@ -50,6 +52,13 @@ def dump(obj, file):
     with open(file, 'wb') as f:
         dill.dump(obj, f, byref=False, recurse=True)
         
+class CPU_Unpickler(dill.Unpickler):
+    def find_class(self, module, name):
+        if module == 'torch.storage' and name == '_load_from_bytes':
+            return lambda b: torch.load(io.BytesIO(b), map_location=torch.device('cpu'))
+        else:
+            return super().find_class(module, name)
+        
 def load(file):
     with open(file, 'rb') as f:
-        return dill.load(f, ignore=True)
+        return CPU_Unpickler(f, ignore=True).load()
