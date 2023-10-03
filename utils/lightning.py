@@ -77,8 +77,9 @@ class TrainEvalModule(nn.Module):
             count = count + b["dfs"][:, self.cids].sum(dim=0)
             sum_spikes = sum_spikes + (b["dfs"][:, self.cids]*b["robs"][:, self.cids]).sum(dim=0)
         assert all(count > 1), "Some neurons have no data. Check your cids, data and datafilters."
-        self.register_buffer("mean_spikes", sum_spikes/count)
+        self.register_buffer("mean_spikes", (sum_spikes/count).unsqueeze(0))
     def __call__(self, rpred, batch):
+        device = rpred.device
         llsum = self.loss(
             rpred,
             batch["robs"][:, self.cids],
@@ -87,7 +88,7 @@ class TrainEvalModule(nn.Module):
         )
 
         llnull = self.loss(
-            self.mean_spikes.repeat(len(batch["robs"]), 1),
+            self.mean_spikes.to(device).expand((len(batch["robs"]), -1)),
             batch["robs"][:, self.cids],
             data_filters=batch["dfs"][:, self.cids],
             temporal_normalize=False
@@ -139,11 +140,11 @@ class PLWrapper(pl.LightningModule):
                 g['lr'] = self.learning_rate
         else:
             raise ValueError("lr must be specified, yet it is None")
-    
-    def on_fit_start(self):
+        
+    def on_train_start(self):
         if hasattr(self, 'train_eval_module'):
             self.train_eval_module.start(self.trainer.train_dataloader)
-        return super().on_fit_start()
+        return super().on_train_start()
     
     def training_step(self, x, batch_idx=0, dataloader_idx=0):
         x = self.preprocess_data(x)
