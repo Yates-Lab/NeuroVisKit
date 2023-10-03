@@ -128,10 +128,10 @@ class PLWrapper(pl.LightningModule):
         else:
             raise ValueError("lr must be specified, yet it is None")
     
-    def on_train_epoch_start(self):
+    def on_fit_start(self):
         if hasattr(self, 'train_eval_module'):
             self.train_eval_module.start(self.trainer.train_dataloader)
-        return super().on_train_epoch_start()
+        return super().on_fit_start()
     
     def training_step(self, x, batch_idx=0, dataloader_idx=0):
         x = self.preprocess_data(x)
