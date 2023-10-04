@@ -149,6 +149,10 @@ class PLWrapper(pl.LightningModule):
         return super().on_train_start()
     
     def training_step(self, x, batch_idx=0, dataloader_idx=0):
+
+        if hasattr(self.wrapped_model, 'current_epoch'):
+            self.wrapped_model.current_epoch = self.current_epoch
+            
         x = self.preprocess_data(x)
         if hasattr(self, 'train_eval_module'):
             losses = self.wrapped_model.training_step(x, alternative_loss_fn=self.train_eval_module)
