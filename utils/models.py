@@ -125,7 +125,7 @@ class PytorchWrapper(ModelWrapper):
 
 class RobsAugmenter(PytorchWrapper):
 
-    def __init__(self, model, *args, gaussian_kernel_size=5, gaussian_kernel_sigma=1, l1=0, l2=0, **kwargs):
+    def __init__(self, model, *args, gaussian_kernel_size=5, gaussian_kernel_sigma=1, sigma_decay=5, l1=0, l2=0, **kwargs):
 
         super().__init__(model, *args, **kwargs)
 
@@ -133,6 +133,9 @@ class RobsAugmenter(PytorchWrapper):
         self.kernel_sigma = gaussian_kernel_sigma
         self.l1 = l1
         self.l2 = l2
+        self.current_epoch = 0
+        self.sigma_decay = torch.tensor(sigma_decay)
+        self.sigma = self.kernel_sigma / torch.exp(self.current_epoch/self.sigma_decay)
 
         self.register_buffer('kernel', utils.gaussian_kernel_1D(gaussian_kernel_size, gaussian_kernel_sigma).unsqueeze(0).unsqueeze(0))
 
@@ -140,8 +143,12 @@ class RobsAugmenter(PytorchWrapper):
         
         
         y = batch['robs'][:,self.cids]
-        if self.training:
-            ysmooth = F.conv1d(y.T.unsqueeze(1), self.kernel, padding=self.kernel_size//2).squeeze().T
+        self.sigma = self.kernel_sigma / torch.exp(self.current_epoch/self.sigma_decay)
+
+        if self.training and self.sigma>.5:
+            kernel = utils.gaussian_kernel_1D(self.kernel_size, self.sigma).unsqueeze(0).unsqueeze(0).to(y.device)
+            ysmooth = F.conv1d(y.T.unsqueeze(1), kernel, padding=self.kernel_size//2).squeeze().T
+            del kernel
             # y = torch.poisson(ysmooth).detach()
             y = ysmooth.detach() # < torch.rand_like(ysmooth)
         
