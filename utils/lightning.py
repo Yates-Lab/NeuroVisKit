@@ -106,11 +106,12 @@ class TrainEvalModule(nn.Module):
         return LLneuron
     
 class PLWrapper(pl.LightningModule):
-    def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=PreprocessFunction(), normalize_loss=False):
+    def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=PreprocessFunction(), normalize_loss=False, optimizer_kwargs={}):
         super().__init__()
         self.wrapped_model = wrapped_model
         self.model = wrapped_model.model
         self.opt = optimizer
+        self.opt_kwargs = optimizer_kwargs
         self.opt_instance = None
         self.learning_rate = lr
         self.preprocess_data = preprocess_data
@@ -127,7 +128,7 @@ class PLWrapper(pl.LightningModule):
         return self.wrapped_model(self.preprocess_data(x))
     
     def configure_optimizers(self):
-        self.opt_instance = self.opt(self.wrapped_model.parameters(), lr=self.learning_rate)
+        self.opt_instance = self.opt(self.wrapped_model.parameters(), lr=self.learning_rate, **self.opt_kwargs)
         return self.opt_instance
     
     def update_lr(self, lr=None):

@@ -1,5 +1,6 @@
 #%%## regularization.py: managing regularization
 from logging import warning
+from turtle import forward
 from cvxpy import huber
 import torch
 from torch import nn
@@ -164,6 +165,14 @@ class ActivityL1(ActivityRegularization):
 
     def function(self, *args):
         return self.activations.abs().mean()
+
+class ActivityL1Sum(ActivityRegularization):
+
+    def __init__(self, module, coefficient=1, **kwargs):
+        super().__init__(module, coefficient=coefficient, **kwargs)
+
+    def function(self, *args):
+        return self.activations.abs().sum()
     
 class ActivityL2(ActivityRegularization):
 
@@ -172,7 +181,10 @@ class ActivityL2(ActivityRegularization):
 
     def function(self, *args):
         return self.activations.pow(2).mean()
-        
+
+class IdentityModule(nn.Module):
+    def forward(self, x):
+        return x
         
 class Compose(Regularization): #@TODO change to module list or remove entirely
     def __init__(self, *RegModules):
