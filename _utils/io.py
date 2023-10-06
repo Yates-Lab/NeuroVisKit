@@ -5,6 +5,9 @@ import torch
 import io
 from copy import deepcopy
 
+from zmq import has
+from NeuroVisKit._utils.lightning import clean_model_from_wandb
+
 def hash_object_code(obj, hash_algorithm="shake128"):
     return hash_string(inspect.getsource(obj), hash_algorithm)
 
@@ -49,6 +52,7 @@ def dump(obj, file):
             obj.to("cpu")
         elif hasattr(obj, 'device'):
             obj = obj.to("cpu")
+        clean_model_from_wandb(obj)
     except:
         print('could not move object to cpu during dump')
     with open(file, 'wb') as f:

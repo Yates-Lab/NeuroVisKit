@@ -6,6 +6,33 @@ import torch.nn as nn
 from NeuroVisKit.utils.process import get_process_dict
 from NeuroVisKit._utils.utils import compose
 
+def clean_model_from_wandb(model):
+    if hasattr(model, "_wandb_hook_names"):
+        del model._wandb_hook_names
+    if hasattr(model, "_forward_hooks"):
+        for k, v in model._forward_hooks.items():
+            s = str(v).lower()
+            if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
+                del model._forward_hooks[k]
+    if hasattr(model, "model") and hasattr(model.model, "_forward_hooks"):
+        for k, v in model.model._forward_hooks.items():
+            s = str(v).lower()
+            if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
+                del model.model._forward_hooks[k]
+    if hasattr(model, "wrapped_model") and hasattr(model.wrapped_model, "_forward_hooks"):
+        for k, v in model.wrapped_model._forward_hooks.items():
+            s = str(v).lower()
+            if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
+                del model.wrapped_model._forward_hooks[k]
+    if hasattr(model, "modules"):
+        for module in model.modules():
+            if hasattr(module, "_forward_hooks"):
+                for k, v in module._forward_hooks.items():
+                    s = str(v).lower()
+                    if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
+                        del module._forward_hooks[k]
+    return model
+
 def pl_device_format(device):
     """Convert a torch device to the format expected by pytorch lightning.
     **ONLY WORKS FOR SINGLE DEVICE**

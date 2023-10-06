@@ -194,6 +194,12 @@ class Compose(Regularization): #@TODO change to module list or remove entirely
         return sum([arg() for arg in self.args])
     def __getitem__(self, i):
         return self.args[i]
+    def append(self, module):
+        self.args.append(module)
+    def extend(self, modules):
+        self.args.extend(modules)
+    def __add__(self, modules):
+        return self.extend(modules)
 
 class gradMagLog(torch.autograd.Function):
     @staticmethod
