@@ -16,6 +16,18 @@ from .utils import to_device
 from scipy.signal import find_peaks
 import torch.nn as nn
 
+def get_model_conv_weights(model):
+    '''
+        Get the weights of the convolutional layers of a model.
+        Returns a list of lists of weights.
+    '''
+    weights = []
+    for module in model.modules():
+        # check if convolutional layer
+        if issubclass(type(module), nn.modules.conv._ConvNd):
+            weights.append(module.weight.data.cpu().numpy())
+    return weights
+
 def plot_model_conv(model):
     f = []
     i = 0
@@ -612,6 +624,7 @@ def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
     LLneuron = LLsum/Rsum.clamp(1)
 
     rbar = Rsum/Tsum.clamp(1)
+    assert (rbar > 0).all(), 'Eval model: some neurons have no spikes.'
     LLnulls = torch.log(rbar)-1
     LLneuron = -LLneuron - LLnulls
 
@@ -619,7 +632,7 @@ def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
 
     return LLneuron.detach().cpu().numpy()
 
-def eval_model_summary(model, valid_dl, **kwargs):
+def eval_model_summary(model, valid_dl, topk=None, **kwargs):
     ev = eval_model_fast(model, valid_dl, **kwargs)
     print(ev)
     if np.inf in ev or np.nan in ev:
@@ -628,10 +641,11 @@ def eval_model_summary(model, valid_dl, **kwargs):
         print(f'Warning: {i} neurons have infinite/nan bits/spike, and {ni} neurons have ninf.')
         ev = ev[~np.isinf(ev) & ~np.isnan(ev)]
     # Creating histogram
+    topk_ev = np.sort(ev)[:-topk] if topk is not None else ev
     _, ax = plt.subplots()
-    ax.hist(ev, bins=10)
-    plt.axvline(x=np.max(ev), color='r', linestyle='--')
-    plt.axvline(x=np.min(ev), color='r', linestyle='--')
+    ax.hist(topk_ev, bins=10)
+    plt.axvline(x=np.max(topk_ev), color='r', linestyle='--')
+    plt.axvline(x=np.min(topk_ev), color='r', linestyle='--')
     plt.xlabel("Bits/spike")
     plt.ylabel("Neuron count")
     plt.title("Model performance")

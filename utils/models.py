@@ -102,7 +102,7 @@ class PytorchWrapper(ModelWrapper):
     def train(self, mode=True):
         self.reg = regularization.extract_reg(self.model, proximal=False)
         self.proximal_reg = regularization.extract_reg(self.model, proximal=True)
-        print("reinitialized", self.reg, self.proximal_reg)
+        # print("reinitialized", self.reg, self.proximal_reg)
         return super().train(mode)
     def compute_reg_loss(self, *args, **kwargs):
         loss = sum([r() for r in self.reg]+[0])
