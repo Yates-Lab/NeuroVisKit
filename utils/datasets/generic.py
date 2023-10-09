@@ -57,6 +57,8 @@ class ContiguousDataset(GenericDataset):
             relevant_blocks = [self.block[index]]
         elif type(index) is list:
             relevant_blocks = [self.block[i] for i in index]
+        elif type(index) is torch.Tensor or type(index) is np.ndarray:
+            return self.__getitem__(index.tolist())
         else:
             # takes care of slices
             relevant_blocks = self.block[index]
