@@ -641,7 +641,7 @@ def eval_model_summary(model, valid_dl, topk=None, **kwargs):
         print(f'Warning: {i} neurons have infinite/nan bits/spike, and {ni} neurons have ninf.')
         ev = ev[~np.isinf(ev) & ~np.isnan(ev)]
     # Creating histogram
-    topk_ev = np.sort(ev)[:-topk] if topk is not None else ev
+    topk_ev = np.sort(ev)[topk:] if topk is not None else ev
     _, ax = plt.subplots()
     ax.hist(topk_ev, bins=10)
     plt.axvline(x=np.max(topk_ev), color='r', linestyle='--')
