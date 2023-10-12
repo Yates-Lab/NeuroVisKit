@@ -149,6 +149,11 @@ class PLWrapper(pl.LightningModule):
             self.model.on_train_start(self)
         return super().on_train_start()
     
+    def on_train_end(self):
+        if hasattr(self.model, 'on_train_end'):
+            self.model.on_train_end(self)
+        return super().on_train_end()
+    
     def training_step(self, x, batch_idx=0, dataloader_idx=0):
 
         if hasattr(self.wrapped_model, 'current_epoch'):
