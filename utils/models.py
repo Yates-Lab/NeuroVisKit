@@ -105,12 +105,12 @@ class PytorchWrapper(ModelWrapper):
         # print("reinitialized", self.reg, self.proximal_reg)
         return super().train(mode)
     def compute_reg_loss(self, *args, **kwargs):
-        loss = sum([r() for r in self.reg]+[0])
+        loss = sum([r() for r in self.reg]+[0.0])
         # if type(loss) is int:
         #     return torch.tensor(loss, device=self.parameters().__next__().device).float()
         return loss
     def compute_proximal_reg_loss(self, *args, **kwargs):
-        return sum([r() for r in self.proximal_reg]+[0])
+        return sum([r() for r in self.proximal_reg]+[0.0])
     def forward(self, x, pass_dict=False, *args, **kwargs):
         if not self.bypass_preprocess:
             if type(x) is dict and not pass_dict:

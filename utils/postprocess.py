@@ -84,8 +84,7 @@ def plot_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs
     '''
     n = len(mat)
     m = len(mat[0])
-    
-    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(2*m, 2*n))
+    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(m, n))
     
     for i in tqdm(range(n), desc=desc):
         for j in range(m):

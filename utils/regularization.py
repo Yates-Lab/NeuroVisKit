@@ -253,11 +253,12 @@ class GradMagnitudeLogger(nn.Module):
 class Pnorm(RegularizationModule):
     def __init__(self, coefficient=1, **kwargs):
         super().__init__(coefficient=coefficient, **kwargs)
-        self.register_buffer('p', torch.tensor(kwargs.get('p', 2)))
+        self.p = kwargs['p']
+        # self.register_buffer('p', torch.tensor(kwargs.get('p', 2)))
         # self.f = GradMagnitudeLogger("l"+str(self.p))
     def function(self, x):
         # x = self.f(x)
-        out = (torch.abs(x).pow(self.p)).sum()
+        out = (torch.abs(x)**self.p).sum()
 
         # out = gradLessDivide.apply(out, x.numel())
         # out = gradLessPower.apply(out, 1/self.p)
