@@ -4,6 +4,7 @@ import time
 import random
 from copy import deepcopy
 import numpy as np
+import scipy
 import torch
 import dill
 from torch.utils.data import DataLoader
@@ -12,6 +13,7 @@ from NeuroVisKit.utils.datasets.generic import GenericDataset
 from tqdm import tqdm
 from functools import reduce
 from IPython.display import Video
+import scipy.signal as signal
 import imageio
 from NeuroVisKit._utils.utils import memory_clear
 import torch.nn as nn
@@ -261,7 +263,12 @@ def dl_device(dl):
         return batch.values().__iter__().__next__().device
     return batch[0].device
 
-def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True):
+def r2(y, y_hat, dim=0):
+    return 1 - torch.sum((y - y_hat)**2, dim=dim)/torch.sum((y - torch.mean(y, dim=dim))**2, dim=dim)
+def r2_numpy(y, y_hat, dim=0):
+    return 1 - np.sum((y - y_hat)**2, axis=dim)/np.sum((y - np.mean(y, axis=dim))**2, axis=dim)
+
+def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smooth=0, r2_score=False):
     assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
     assert issubclass(type(model), nn.Module), "model must be a nn.Module"
     assert len(cids) > 0, "cids must be a list of channel ids"
@@ -287,9 +294,15 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True):
             i += b
     inds = torch.where(sac_on)[0].to(device)
     del sac_on
-    transientY = event_triggered_op(Y, inds, bins, reduction=torch.mean).cpu()
+    transientY = event_triggered_op(Y, inds, bins, reduction=torch.mean).cpu().numpy()
     del Y
-    transientY_hat = event_triggered_op(Y_hat, inds, bins, reduction=torch.mean).cpu()
+    transientY_hat = event_triggered_op(Y_hat, inds, bins, reduction=torch.mean).cpu().numpy()
+    
+    if smooth:
+        #use savgol filter
+        transientY = signal.savgol_filter(transientY, window_length=smooth, polyorder=1, axis=0)
+        transientY_hat = signal.savgol_filter(transientY_hat, window_length=smooth, polyorder=1, axis=0)
+    
     NC = transientY.shape[-1]
     sx = int(np.ceil(np.sqrt(NC)))
     sy = int(np.round(np.sqrt(NC)))
@@ -304,6 +317,14 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True):
         plt.axis('off')
         plt.title(cids[cc])
     plt.tight_layout()
+    if r2_score:
+        f2 = plt.figure()
+        r2_score = r2_numpy(transientY, transientY_hat, dim=0)
+        plt.hist(r2_score)
+        plt.xlabel("R2 score")
+        plt.ylabel("Number of neurons")
+        plt.title("R2 dist for transients smoothed with window length %d. Avg is %.2f" %(smooth, r2_score.mean()))
+        return transientY, transientY_hat, [f2, f]
     return transientY, transientY_hat, f
     
 
