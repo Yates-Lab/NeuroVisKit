@@ -5,6 +5,7 @@ from cvxpy import huber
 import torch
 from torch import nn
 from torch.nn.modules.utils import _reverse_repeat_tuple
+from NeuroVisKit._utils.utils import is_nn_module
 from torch.nn import functional as F
 import numpy as np
 from functools import reduce
@@ -21,9 +22,9 @@ def extract_reg(module, proximal=False):
                 isregmodule = issubclass(current_module._parent_class, RegularizationModule)
                 isactivity = issubclass(current_module._parent_class, ActivityRegularization)
                 if isproximal or isregmodule:
-                    if proximal == isproximal:
+                    if proximal == isproximal and current_module.coefficient:
                         out_modules.append(current_module)
-                if isactivity:
+                if isactivity and current_module.coefficient:
                     out_modules.append(current_module)
             elif issubclass(type(current_module), nn.Module):
                 out_modules += get_reg_helper(current_module)
@@ -94,27 +95,29 @@ class ProximalRegularizationModule(Regularization):
             self.log(out)
         # print(f'{self.__class__.__name__}: {y}')
         return out
-
     def log(self, x):
         return gradMagLog.apply(x, self.__class__.__name__)
     
 class RegularizationModule(Regularization):
     def __init__(self, coefficient=1, shape=None, dims=None, target=None, keepdims=None, **kwargs):
         super().__init__()
-        assert target is not None, 'Please set a target object for regularization module.'
+        if is_nn_module(target):
+            assert hasattr(target, 'weight')
+        else:
+            assert target is not None, 'Please set a target object for regularization module.'
         if isinstance(dims, int):
             dims = [dims]
         
         if isinstance(keepdims, int):
             keepdims = [keepdims]
+        self._target = target
         
         if shape is None and target is not None:
-            shape = target.shape
+            shape = self.target.shape
 
         self.dims = dims
         self.shape = shape
         self.coefficient = coefficient
-        self.target = target
         self.keepdims = _verify_dims(self.shape, keepdims) if keepdims is not None else []
         self._parent_class = RegularizationModule # critical for extract_reg to work when importing from different paths
         
@@ -131,7 +134,12 @@ class RegularizationModule(Regularization):
         assert y<1e10 and not torch.isnan(y), f'Penalty likely diverged for regularization type {self.__class__.__name__}'
         # print(f'{self.__class__.__name__}: {y}')
         return y
-
+    @property
+    def target(self):
+        if is_nn_module(self._target):
+            return self._target.weight
+        else:
+            return self._target
     def log(self, x):
         return gradMagLog.apply(x, self.__class__.__name__)
     

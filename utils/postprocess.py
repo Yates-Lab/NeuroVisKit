@@ -16,6 +16,28 @@ from .utils import to_device
 from scipy.signal import find_peaks
 import torch.nn as nn
 
+import torch.nn as nn
+
+def unique(x):
+    #maintain order unlike list(set(x))
+    out = []
+    for i in x:
+        if i not in out:
+            out.append(i)
+    return out
+
+def get_conv_submodules(module, parent_has_weight=False):
+    submodules = []
+    # Check if the current module has a "weight" property
+    has_weight = hasattr(module, 'weight') and (issubclass(type(module), nn.modules.conv._ConvNd) or ("conv" in type(module).__name__.lower()))
+    # If the parent or the current module has a "weight" property, don't traverse its children
+    if parent_has_weight or has_weight:
+        return [module]
+    # Otherwise, traverse its children
+    for child in module.children():
+        submodules.extend(get_conv_submodules(child, has_weight))
+    return unique(submodules)
+
 def get_model_conv_weights(model):
     '''
         Get the weights of the convolutional layers of a model.
@@ -31,20 +53,21 @@ def get_model_conv_weights(model):
 def plot_model_conv(model):
     f = []
     i = 0
-    for module in model.modules():
+    submods = get_conv_submodules(model)
+    for module in submods: #model.modules()
         # check if convolutional layer
-        if issubclass(type(module), nn.modules.conv._ConvNd):
-            w = module.weight.data.cpu().numpy()
-            if len(w.shape) == 5: # 3d conv (cout, cin, x, y, t)
-                w = w.squeeze(1) # asume cin is 1
-                w = w/np.abs(w).max(keepdims=True) # normalize all |xyt (1, 2, 3)
-            elif len(w.shape) == 4: # 2d conv (cout, cin, x, y)
-                w = w/np.abs(w).max(keepdims=True) # normalize all |cin xy (1, 2, 3)
-            # shape is (cout, cin, x, y)
-            titles = ['cout %d'%i for i in range(w.shape[0])]
-            ft = plot_grid(w, titles=titles, suptitle='Layer %d'%i, desc='Layer %d'%i, vmin=-1, vmax=1)
-            i += 1
-            f.append(ft)
+        # if issubclass(type(module), nn.modules.conv._ConvNd):
+        w = module.weight.detach().data.cpu().numpy()
+        if len(w.shape) == 5: # 3d conv (cout, cin, x, y, t)
+            w = w.squeeze(1) # asume cin is 1
+            w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize all |xyt (1, 2, 3)
+        elif len(w.shape) == 4: # 2d conv (cout, cin, x, y)
+            w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize all |cin xy (1, 2, 3)
+        # shape is (cout, cin, x, y)
+        titles = ['cout %d'%i for i in range(w.shape[0])]
+        ft = plot_grid(w, titles=titles, suptitle='Layer %d'%i, desc='Layer %d'%i, vmin=-1, vmax=1)
+        i += 1
+        f.append(ft)
     return f
             
 class Loader():
@@ -88,11 +111,19 @@ def plot_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs
     
     for i in tqdm(range(n), desc=desc):
         for j in range(m):
-            axes[i, j].imshow(mat[i][j], vmin=vmin, vmax=vmax, interpolation='none')
-            axes[i, j].axis('off')
-
+            img = mat[i][j]
+            #the following is a patch to fix an indexing error in matplotlib
+            if n == 1:
+                axs = axes[j]
+            elif m == 1:
+                axs = axes[i]
+            else:
+                axs = axes[i, j]
+                
+            axs.imshow(img, vmin=vmin, vmax=vmax, interpolation='none')
+            axs.axis('off')
             if titles is not None:
-                axes[i, j].set_title(titles[i])
+                axs.set_title(titles[i])
     
     for key in kwargs:
         eval(f'plt.{key}')(kwargs[key])
@@ -640,7 +671,7 @@ def eval_model_summary(model, valid_dl, topk=None, **kwargs):
         print(f'Warning: {i} neurons have infinite/nan bits/spike, and {ni} neurons have ninf.')
         ev = ev[~np.isinf(ev) & ~np.isnan(ev)]
     # Creating histogram
-    topk_ev = np.sort(ev)[topk:] if topk is not None else ev
+    topk_ev = np.sort(ev)[-topk:] if topk is not None else ev
     _, ax = plt.subplots()
     ax.hist(topk_ev, bins=10)
     plt.axvline(x=np.max(topk_ev), color='r', linestyle='--')

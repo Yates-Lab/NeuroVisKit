@@ -3,6 +3,7 @@ import numpy as np
 import random
 import contextlib
 import torch
+import torch.nn as nn
 from functools import reduce
 import importlib.util
 import torch.nn.functional as F
@@ -22,6 +23,8 @@ import platform
     # for k, v in globals().copy().items():
     #     if issubclass(type(v), torch.Tensor):
     #         print(k, v.element_size() * v.nelement() / 1e9, 'GB', v.device)
+def is_nn_module(x):
+    return isinstance(x, torch.nn.Module) or isinstance(x, nn.Module)
 
 def auto_device():
     if platform.system().lower() == 'darwin':

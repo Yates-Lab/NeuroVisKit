@@ -268,7 +268,7 @@ def r2(y, y_hat, dim=0):
 def r2_numpy(y, y_hat, dim=0):
     return 1 - np.sum((y - y_hat)**2, axis=dim)/np.sum((y - np.mean(y, axis=dim))**2, axis=dim)
 
-def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smooth=0, r2_score=False):
+def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smooth=0, r2_score=False, topk=None):
     assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
     assert issubclass(type(model), nn.Module), "model must be a nn.Module"
     assert len(cids) > 0, "cids must be a list of channel ids"
@@ -320,6 +320,8 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smoot
     if r2_score:
         f2 = plt.figure()
         r2_score = r2_numpy(transientY, transientY_hat, dim=0)
+        if topk is not None:
+            r2_score = np.sort(r2_score)[-topk:]
         plt.hist(r2_score)
         plt.xlabel("R2 score")
         plt.ylabel("Number of neurons")

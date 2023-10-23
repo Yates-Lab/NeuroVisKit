@@ -271,10 +271,177 @@ class ExperimentalNDNTLossWrapper(nn.Module):
         return unitloss
         # END PoissonLoss_datafilter.unit_loss
         
+class NDNTLossWrapper(nn.Module):
+    '''
+        Wrap a loss module to allow NDNT functionality
+    '''
+    def __init__(self,loss_no_reduction, name, scalable=False):
+        super().__init__()
+        self.name = name
+        self.loss = loss_no_reduction
+        self.unit_weighting = False
+        self.batch_weighting = 0
+        self.register_buffer('unit_weights', None)  
+        self.register_buffer('av_batch_size', None) 
+        self.scalable = scalable
+
+    def set_loss_weighting( self, batch_weighting=None, unit_weighting=None, unit_weights=None, av_batch_size=None ):
+        if batch_weighting is not None:
+            self.batch_weighting = batch_weighting 
+        if unit_weighting is not None:
+            self.unit_weighting = unit_weighting 
+
+        if unit_weights is not None:
+            self.unit_weights = torch.tensor(unit_weights, dtype=torch.float32)
+
+        assert self.batch_weighting in [-1, 0, 1, 2], "LOSS: Invalid batch_weighting"
+        
+        if av_batch_size is not None:
+            self.av_batch_size = torch.tensor(av_batch_size, dtype=torch.float32)
+
+    def forward(self, pred, target, data_filters=None ):        
+        if self.scalable:
+            return (self.loss(pred, target) * data_filters).sum() / pred.shape[0]
+        
+        unit_weights = torch.ones( pred.shape[1], device=pred.device)
+        if self.batch_weighting == 0:  # batch_size
+            unit_weights /= pred.shape[0]
+        elif self.batch_weighting == 1: # data_filters
+            assert data_filters is not None, "LOSS: batch_weighting requires data filters"
+            unit_weights = torch.reciprocal( torch.sum(data_filters, axis=0).clamp(min=1) )
+        elif self.batch_weighting == 2: # average_batch_size
+            unit_weights /= self.av_batch_size
+        # Note can leave as 1s if unnormalized
+
+        if self.unit_weighting:
+            unit_weights *= self.unit_weights
+
+        if data_filters is None:
+            # Currently this does not apply unit_norms
+            loss = self.loss(pred, target).mean()
+        else:
+            loss_full = self.loss(pred, target)
+            # divide by number of valid time points
+            
+            loss = torch.sum(torch.mul(unit_weights, torch.mul(loss_full, data_filters))) / len(unit_weights)
+        return loss
+    # END PoissonLoss_datafilter.forward
+
+    def unit_loss(self, pred, target, data_filters=None, temporal_normalize=True ):        
+        """This should be equivalent of forward, without sum over units
+        Currently only true if batch_weighting = 'data_filter'"""
+
+        if data_filters is None:
+            unitloss = torch.sum(
+                self.loss(pred, target),
+                axis=0)
+        else:
+            loss_full = self.loss(pred, target)
+
+            unit_weighting = 1.0/torch.maximum(
+                torch.sum(data_filters, axis=0),
+                torch.tensor(1.0, device=data_filters.device) )
+
+            if temporal_normalize:
+                unitloss = torch.mul(unit_weighting, torch.sum( torch.mul(loss_full, data_filters), axis=0) )
+            else:
+                unitloss = torch.sum( torch.mul(loss_full, data_filters), axis=0 )
+        return unitloss
+        # END PoissonLoss_datafilter.unit_loss
+        
+class NDNTLossWrapperRobust(nn.Module):
+    '''
+        Wrap a loss module to allow NDNT functionality
+    '''
+    def __init__(self,loss_no_reduction, name, scalable=False):
+        super().__init__()
+        self.name = name
+        self.loss = loss_no_reduction
+        self.unit_weighting = False
+        self.batch_weighting = 0
+        self.register_buffer('unit_weights', None)  
+        self.register_buffer('av_batch_size', None) 
+        self.scalable = scalable
+
+    def set_loss_weighting( self, batch_weighting=None, unit_weighting=None, unit_weights=None, av_batch_size=None ):
+        if batch_weighting is not None:
+            self.batch_weighting = batch_weighting 
+        if unit_weighting is not None:
+            self.unit_weighting = unit_weighting 
+
+        if unit_weights is not None:
+            self.unit_weights = torch.tensor(unit_weights, dtype=torch.float32)
+
+        assert self.batch_weighting in [-1, 0, 1, 2], "LOSS: Invalid batch_weighting"
+        
+        if av_batch_size is not None:
+            self.av_batch_size = torch.tensor(av_batch_size, dtype=torch.float32)
+
+    def forward(self, pred, target, data_filters=None ):   
+        if self.training:     
+            per_neuron_loss = (self.loss(pred, target) * data_filters).sum(0) / data_filters.sum(0).clamp(min=1)
+            with torch.no_grad():
+                mn, std = per_neuron_loss.mean(), per_neuron_loss.std()
+                thresh = mn + 3*std
+                good_neurons = per_neuron_loss < thresh   
+            loss = (per_neuron_loss*good_neurons).sum()        
+            if self.scalable:
+                return loss
+            return loss if self.scalable else loss / good_neurons.sum()
+        else:
+            if self.scalable:
+                return (self.loss(pred, target) * data_filters).sum() / pred.shape[0]
+            
+            unit_weights = torch.ones( pred.shape[1], device=pred.device)
+            if self.batch_weighting == 0:  # batch_size
+                unit_weights /= pred.shape[0]
+            elif self.batch_weighting == 1: # data_filters
+                assert data_filters is not None, "LOSS: batch_weighting requires data filters"
+                unit_weights = torch.reciprocal( torch.sum(data_filters, axis=0).clamp(min=1) )
+            elif self.batch_weighting == 2: # average_batch_size
+                unit_weights /= self.av_batch_size
+            # Note can leave as 1s if unnormalized
+
+            if self.unit_weighting:
+                unit_weights *= self.unit_weights
+
+            if data_filters is None:
+                # Currently this does not apply unit_norms
+                loss = self.loss(pred, target).mean()
+            else:
+                loss_full = self.loss(pred, target)
+                # divide by number of valid time points
+                loss = torch.sum(torch.mul(unit_weights, torch.mul(loss_full, data_filters))) / len(unit_weights)
+            return loss
+
+    def unit_loss(self, pred, target, data_filters=None, temporal_normalize=True ):        
+        """This should be equivalent of forward, without sum over units
+        Currently only true if batch_weighting = 'data_filter'"""
+
+        if data_filters is None:
+            unitloss = torch.sum(
+                self.loss(pred, target),
+                axis=0)
+        else:
+            loss_full = self.loss(pred, target)
+
+            unit_weighting = 1.0/torch.maximum(
+                torch.sum(data_filters, axis=0),
+                torch.tensor(1.0, device=data_filters.device) )
+
+            if temporal_normalize:
+                unitloss = torch.mul(unit_weighting, torch.sum( torch.mul(loss_full, data_filters), axis=0) )
+            else:
+                unitloss = torch.sum( torch.mul(loss_full, data_filters), axis=0 )
+        return unitloss
+        # END PoissonLoss_datafilter.unit_loss
+        
 class Poisson(NDNTLossWrapper):
     def __init__(self, scalable=False):
         super().__init__(poisson_f, "poisson", scalable=scalable)
-    
+class PoissonRobust(NDNTLossWrapperRobust):
+    def __init__(self, scalable=False):
+        super().__init__(poisson_f, "poisson", scalable=scalable)
 LOSS_DICT = {
     'mse': NDNTLossWrapper(mse_f, "mse"),
     'poisson': NDNTLossWrapper(poisson_f, "poisson"),

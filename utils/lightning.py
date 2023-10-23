@@ -54,7 +54,7 @@ class EvalModule:
         if zeros:
             print(f"(ignore if just sanity checking) no spikes detected for neurons {zeros}. Check your cids, data and datafilters.")
             self.reset()
-            return torch.tensor(0)
+            return torch.tensor(0.0)
         LLneuron = self.llsum/self.rsum.clamp(1)
         rbar = self.rsum/self.tsum.clamp(1)
         LLnulls = torch.log(rbar)-1
@@ -191,7 +191,7 @@ class PLWrapper(pl.LightningModule):
     
     def on_validation_epoch_end(self) -> None:
         if self.opt != torch.optim.LBFGS:
-            self.log("val_loss", -1*self.eval_module.closure().mean(), prog_bar=True, on_epoch=True)
+            self.log("val_loss", -1*torch.mean(self.eval_module.closure()), prog_bar=True, on_epoch=True)
         with torch.no_grad():
             self._logging()
     
