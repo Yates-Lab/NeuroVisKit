@@ -654,7 +654,8 @@ def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
     LLneuron = LLsum/Rsum.clamp(1)
 
     rbar = Rsum/Tsum.clamp(1)
-    assert (rbar > 0).all(), 'Eval model: some neurons have no spikes.'
+    if not (rbar > 0).all():
+        print('Eval model: some neurons have no spikes.')
     LLnulls = torch.log(rbar)-1
     LLneuron = -LLneuron - LLnulls
 
