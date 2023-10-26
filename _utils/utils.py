@@ -149,6 +149,7 @@ def get_opt_dict(opt_config, default=None):
             3. (shorthand, fullname, value) sets argument to value if the option is present
             4. (shorthand, fullname) sets argument to True if the option is present
     """
+    assert type(opt_config) == list, "opt_config must be a list"
     argv = sys.argv[1:]
     opt_names = [i[1] for i in opt_config if i[1]]
     opt_shorthand = [i[0] for i in opt_config if i[0]]

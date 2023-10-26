@@ -321,7 +321,7 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smoot
         f2 = plt.figure()
         r2_score = r2_numpy(transientY, transientY_hat, dim=0)
         if topk is not None:
-            r2_score = np.sort(r2_score)[-topk:]
+            r2_score = np.sort(r2_score[np.isfinite(r2_score)])[-topk:]
         plt.hist(r2_score)
         plt.xlabel("R2 score")
         plt.ylabel("Number of neurons")
