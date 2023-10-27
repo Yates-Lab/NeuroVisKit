@@ -390,7 +390,7 @@ class NDNTLossWrapperRobust(nn.Module):
             # reversed_loss = (target - pred * torch.log(target).clamp(min=-6))
             # per_neuron_loss = (poisson_loss * data_filters).sum(0) / data_filters.sum(0).clamp(min=1)
             # per_neuron_rev_loss = (reversed_loss * data_filters).sum(0) / data_filters.sum(0).clamp(min=1)
-            a = 0.999
+            a = 0.99
             per_neuron_loss = a*per_neuron_loss + (1-a)*per_neuron_alt_loss
             # with torch.no_grad():
             #     mn, std = per_neuron_loss.mean(), per_neuron_loss.std()
