@@ -13,7 +13,6 @@ from NeuroVisKit.utils.loss import Poisson
 # from unet import UNet, BioV
 import math
 from tqdm import tqdm
-import moten
 
 # from models.cnns import DenseReadout as DenseReadoutNDNT
 

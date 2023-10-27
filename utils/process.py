@@ -1,6 +1,5 @@
 #%%
 from NeuroVisKit._utils.utils import time_embedding
-import moten
 import torch
 from NeuroVisKit._utils.utils import print_off
 import torch.nn as nn
@@ -28,6 +27,7 @@ def Binarize(x):
 class GaborPreprocess(nn.Module):
     def __init__(self, hw, fps=240):
         super().__init__()
+        import moten
         self.hw = hw
         self.pyramid = moten.get_default_pyramid(vhsize=hw, fps=fps)
     def forward(self, x):

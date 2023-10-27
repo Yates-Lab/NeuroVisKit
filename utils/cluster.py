@@ -10,7 +10,6 @@ import torch
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 from . import toy_datasets as tds
-import umap as umap_l
 
 def corr_dist(x, y):
     '''
@@ -85,6 +84,7 @@ def umap(mat, n_components=2, n_neighbors=3):
         Perform UMAP on mat.
         Return the projected matrix on the first n_components.
     '''
+    import umap as umap_l
     fit = umap_l.UMAP(n_components=n_components, n_neighbors=n_neighbors)
     return fit.fit_transform(mat)
 

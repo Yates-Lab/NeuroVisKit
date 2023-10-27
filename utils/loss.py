@@ -1,3 +1,4 @@
+from sympy import per
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -379,15 +380,24 @@ class NDNTLossWrapperRobust(nn.Module):
 
     def forward(self, pred, target, data_filters=None ):   
         if self.training:     
-            per_neuron_loss = (self.loss(pred, target) * data_filters).sum(0) / data_filters.sum(0).clamp(min=1)
-            with torch.no_grad():
-                mn, std = per_neuron_loss.mean(), per_neuron_loss.std()
-                thresh = mn + 3*std
-                good_neurons = per_neuron_loss < thresh   
-            loss = (per_neuron_loss*good_neurons).sum()        
-            if self.scalable:
-                return loss
-            return loss if self.scalable else loss / good_neurons.sum()
+            alternative_target = (1 - target).clamp(0, 1)
+            alternative_loss = pred - alternative_target * torch.log(pred).clamp(min=-6)
+            loss = pred - target * torch.log(pred).clamp(min=-6)
+            per_neuron_loss = (loss*data_filters).sum(0) / data_filters.sum(0).clamp(min=1)
+            per_neuron_alt_loss = (alternative_loss*data_filters).sum(0) / data_filters.sum(0).clamp(min=1)
+            # loss = self.loss(pred, target)
+            # poisson_loss = pred - target * torch.log(pred).clamp(min=-6)
+            # reversed_loss = (target - pred * torch.log(target).clamp(min=-6))
+            # per_neuron_loss = (poisson_loss * data_filters).sum(0) / data_filters.sum(0).clamp(min=1)
+            # per_neuron_rev_loss = (reversed_loss * data_filters).sum(0) / data_filters.sum(0).clamp(min=1)
+            a = 0.999
+            per_neuron_loss = a*per_neuron_loss + (1-a)*per_neuron_alt_loss
+            # with torch.no_grad():
+            #     mn, std = per_neuron_loss.mean(), per_neuron_loss.std()
+            #     thresh = mn + 3*std
+            #     good_neurons = per_neuron_loss < thresh   
+            # loss = (per_neuron_loss*good_neurons).sum()        
+            return per_neuron_loss.sum() if self.scalable else per_neuron_loss.mean()
         else:
             if self.scalable:
                 return (self.loss(pred, target) * data_filters).sum() / pred.shape[0]

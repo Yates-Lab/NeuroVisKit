@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler, Data
 import lightning as pl
 from lightning.pytorch.callbacks import LearningRateFinder
 import tqdm
-from zmq import has
 from NeuroVisKit._utils.lightning import PreprocessFunction
 from NeuroVisKit._utils.utils import get_module_dict, import_module_by_path, sum_dict_list
 import math
