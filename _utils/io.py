@@ -3,10 +3,23 @@ import hashlib
 import inspect
 import torch
 import io
+import os
 from copy import deepcopy
+import re
 
 from NeuroVisKit._utils.lightning import clean_model_from_wandb
 
+def find_file(regex_str, rootdir='.'):
+        regex = re.compile(regex_str)
+        matches = []
+        for root, dirs, files in os.walk(rootdir):
+            for i in files:
+                i = os.path.join(root, i)
+                match = regex.search(i)
+                if match is not None:
+                    matches.append(i)
+        return matches
+    
 def hash_object_code(obj, hash_algorithm="shake128"):
     return hash_string(inspect.getsource(obj), hash_algorithm)
 

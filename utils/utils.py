@@ -268,18 +268,20 @@ def r2(y, y_hat, dim=0):
 def r2_numpy(y, y_hat, dim=0):
     return 1 - np.sum((y - y_hat)**2, axis=dim)/np.sum((y - np.mean(y, axis=dim))**2, axis=dim)
 
-def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smooth=0, r2_score=False, topk=None):
+def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smooth=0, r2_score=False, topk=None, cid_idx=None):
     assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
     assert issubclass(type(model), nn.Module), "model must be a nn.Module"
     assert len(cids) > 0, "cids must be a list of channel ids"
     assert len(bins) == 2, "bins must be a tuple of length 2"
     # assert model_device(model) == dl_device(val_dl), "Model and data must be on same device"
     assert hasattr(val_dl.dataset, 'covariates'), "val_dl.dataset must have covariates"
+    if cid_idx is None:
+        cid_idx = torch.arange(len(cids))
     device = model_device(model)
     N = sum([len(batch['sac_on']) for batch in val_dl])
     sac_on = torch.zeros((N, 1), dtype=torch.bool, device=device)
-    Y = torch.zeros(N, len(cids), dtype=torch.float32, device=device)
-    Y_hat = torch.zeros(N, len(cids), dtype=torch.float32, device=device)
+    Y = torch.zeros(N, len(cid_idx), dtype=torch.float32, device=device)
+    Y_hat = torch.zeros(N, len(cid_idx), dtype=torch.float32, device=device)
     with torch.no_grad():
         i = 0
         for batch in tqdm(val_dl, desc="Preparing for transient computation."):
@@ -287,10 +289,10 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smoot
             for k in batch.keys():
                 batch[k] = batch[k].to(device)
             sac_on[i:i+b] = batch['sac_on']
-            Y[i:i+b] = batch['robs'][:, cids]
-            Y_hat[i:i+b] = model(batch)
+            Y[i:i+b] = batch['robs'][:, cids][:, cid_idx]
+            Y_hat[i:i+b] = model(batch)[:, cid_idx]
             if filter:
-                Y[i:i+b] *= batch['dfs'][:, cids]
+                Y[i:i+b] *= batch['dfs'][:, cids][:, cid_idx]
             i += b
     inds = torch.where(sac_on)[0].to(device)
     del sac_on
@@ -315,7 +317,7 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smoot
         plt.xlim(*bins)
         plt.axis('tight')
         plt.axis('off')
-        plt.title(cids[cc])
+        plt.title(cids[cid_idx[cc]])
     plt.tight_layout()
     if r2_score:
         f2 = plt.figure()
