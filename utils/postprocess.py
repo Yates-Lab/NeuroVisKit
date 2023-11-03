@@ -1,4 +1,5 @@
 #%%
+from cv2 import mean
 import dill
 import os
 import torch
@@ -621,6 +622,52 @@ def eval_model(model, valid_dl):
 
     return LLneuron.detach().cpu().numpy()
 
+# llsp = ((robs * log(pred) - pred) * dfs).sum(0)
+
+# llbase = (((robs * log(mean_firing_guess)) - mean_firing_rate.expand_as(robs)) * dfs).sum(0)
+# llsp - llbase)/sum(dfs*robs)/log(2) 
+class Evaluator(nn.Module):
+    """Module that evaluates the log-likelihood of a model on a given dataset.
+    This is used for training.
+    """
+    def __init__(self, cids):
+        super().__init__()
+        self.cids = cids
+        self.LLnull, self.LLsum, self.nspikes = 0, 0, 0
+    def startDS(self, train_ds=None, means=None):
+        if means is not None:
+            self.register_buffer("mean_spikes", means)
+        elif train_ds is not None:
+            sum_spikes = (train_ds.covariates["robs"][:, self.cids] * train_ds.covariates["dfs"][:, self.cids]).sum(dim=0)
+            self.register_buffer("mean_spikes", sum_spikes / train_ds.covariates["dfs"][:, self.cids].sum(dim=0))
+        else:
+            raise ValueError("Either train_ds or means must be provided.")
+    def getLL(self, pred, batch):
+        poisson_ll = batch["robs"][:, self.cids] * torch.log(pred + 1e-8) - pred
+        return (poisson_ll * batch["dfs"][:, self.cids]).sum(dim=0)
+    def __call__(self, rpred, batch):
+        llsum = self.getLL(rpred, batch).cpu()
+        llnull = self.getLL(self.mean_spikes.to(rpred.device).expand(*rpred.shape), batch).cpu()
+        self.LLnull = self.LLnull + llnull
+        self.LLsum = self.LLsum + llsum
+        self.nspikes = self.nspikes + (batch["dfs"][:, self.cids] * batch["robs"][:, self.cids]).sum(dim=0).cpu()
+        del llsum, llnull, rpred, batch
+    def closure(self):
+        return (self.LLsum - self.LLnull)/self.nspikes.clamp(1)/np.log(2)
+    
+def eval_model_fast_new(model, val_dl, train_ds=None, means=None):
+    '''
+        Evaluate model on validation data.
+        valid_data: either a dataloader or a dictionary of tensors.
+    '''
+    model.eval()
+    with torch.no_grad():
+        evaluator = Evaluator(model.cids)
+        evaluator.startDS(train_ds=train_ds, means=means)
+        for b in tqdm(val_dl, desc='Eval models'):
+            evaluator(model(b), b)
+        return evaluator.closure().detach().cpu().numpy()
+
 def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
     '''
         Evaluate model on validation data.
@@ -663,8 +710,8 @@ def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
 
     return LLneuron.detach().cpu().numpy()
 
-def eval_model_summary(model, valid_dl, topk=None, **kwargs):
-    ev = eval_model_fast(model, valid_dl, **kwargs)
+def eval_model_summary(model, valid_dl, train_ds=None, means=None, topk=None, **kwargs):
+    ev = eval_model_fast_new(model, valid_dl, train_ds=train_ds, means=means)
     print(ev)
     if np.inf in ev or np.nan in ev:
         i = np.count_nonzero(np.isposinf(ev))

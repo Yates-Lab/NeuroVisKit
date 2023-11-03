@@ -9,6 +9,7 @@ import torch
 import dill
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
+from zmq import device
 from NeuroVisKit.utils.datasets.generic import GenericDataset
 from tqdm import tqdm
 from functools import reduce
@@ -245,7 +246,7 @@ def event_triggered_op(covariate, events, range, inds=None, reduction=torch.mean
         # print('Computing ETO for lag %d' %lag)
         ix = inds[(inds+lag >= 0) & (inds+lag < NT)]  
         n_events = len(ix)   
-        c, e = covariate[ix,...], events[ix+lag,...] # shapes (n_events, *any_shape), (n_events, <optional channels>)
+        c, e = covariate[ix+lag,...], events[ix,...] # shapes (n_events, *any_shape), (n_events, <optional channels>)
         new_shapeC, new_shapeE = [n_events, 1, *sz], [n_events, NC, 1]
         et[:, i, ...] = reduction(c.reshape(new_shapeC) * e.reshape(new_shapeE), dim=0)
     if cov_ndims == 0:
@@ -268,7 +269,103 @@ def r2(y, y_hat, dim=0):
 def r2_numpy(y, y_hat, dim=0):
     return 1 - np.sum((y - y_hat)**2, axis=dim)/np.sum((y - np.mean(y, axis=dim))**2, axis=dim)
 
-def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smooth=0, r2_score=False, topk=None, cid_idx=None):
+def r2_dfs(y, yhat, dfs=None):
+    ''' 
+    calculate the variance explained (r-squared)
+    Inputs:
+        y: tensor of shape N x NC
+        yhat: tensor of shape N x NC
+        dfs: tensor of shape N x NC (1 for valid data points, 0 for invalid)
+
+    Outputs:
+        r2: tensor of shape NC
+    '''
+    if dfs is None:
+        dfs = torch.ones(y.shape, device=y.device)
+    ybar = (y * dfs).sum(dim=0) / dfs.sum(dim=0)
+    sstot = torch.sum( ( y*dfs - ybar)**2, dim=0)
+    ssres = torch.sum( (y*dfs - yhat)**2, dim=0)
+    r2 = 1 - ssres/sstot
+    return r2.detach().cpu()
+
+def plot_transientsC_singleModel(model, val_dl, bins=(-40, 100), smooth=0, split=False, plot=True):
+    device = model_device(model)
+    dims = model(next(iter(val_dl))).shape[1:]
+    N = sum([len(batch['sac_on']) for batch in val_dl])
+    sac_on = torch.zeros((N, 1), dtype=torch.bool, device=device)
+    Y_hat = torch.zeros(N, *dims, dtype=torch.float32, device=device)
+    with torch.no_grad():
+        i = 0
+        for batch in tqdm(val_dl, desc="Preparing for transient computation."):
+            b = len(batch['stim'])
+            for k in batch.keys():
+                batch[k] = batch[k].to(device)
+            sac_on[i:i+b] = batch['sac_on']
+            Y_hat[i:i+b] = model(batch)
+            i += b
+    inds = torch.where(sac_on)[0].to(device)
+    del sac_on
+    transientY_hat = event_triggered_op(Y_hat, inds, bins, reduction=torch.mean).cpu().numpy()
+    if smooth:
+        #use savgol filter
+        transientY_hat = signal.savgol_filter(transientY_hat, window_length=smooth, polyorder=1, axis=0)
+    if not plot:
+        return transientY_hat, None
+    NC = transientY_hat.shape[-1]
+    if split:
+        assert NC % 2 == 0, "NC must be even for split"
+    
+    transientsA = transientY_hat[:, :NC//2]
+    transientsB = transientY_hat[:, NC//2:]
+    # alternate between rows of A and B
+    nrows = int(np.ceil(np.sqrt(NC//2)))
+    ncols = int(np.ceil(NC//2 / nrows))
+    f = plt.figure(figsize=(3*ncols, 3*nrows))
+    for cc in range(NC//2):
+        plt.subplot(nrows, ncols, cc+1)
+        plt.plot(transientsA[:, cc], 'red')
+        plt.plot(transientsB[:, cc], 'blue')
+        plt.xlim(*bins)
+        plt.axis('tight')
+        plt.axis('off')
+        plt.title(cc)
+    plt.tight_layout()
+    return transientY_hat, f
+        
+        
+        
+def plot_transientsC_multiDS(ds1, ds2, bins=(-40, 100), filter=True, smooth=0):
+    device = ds1[0]["stim"].device
+    sac1 = torch.where(ds1.covariates['sac_on'])[0].to(device)
+    sac2 = torch.where(ds2.covariates['sac_on'])[0].to(device)
+    Y1 = ds1.covariates['robs']
+    Y2 = ds2.covariates['robs']
+    if filter:
+        Y1 *= ds1.covariates['dfs']
+        Y2 *= ds2.covariates['dfs']
+    t1 = event_triggered_op(Y1, sac1, bins, reduction=torch.mean).cpu().numpy()
+    t2 = event_triggered_op(Y2, sac2, bins, reduction=torch.mean).cpu().numpy()
+    if smooth:
+        #use savgol filter
+        t1 = signal.savgol_filter(t1, window_length=smooth, polyorder=1, axis=0)
+        t2 = signal.savgol_filter(t2, window_length=smooth, polyorder=1, axis=0)
+    NC = t1.shape[-1]
+    sx = int(np.ceil(np.sqrt(NC)))
+    sy = int(np.round(np.sqrt(NC)))
+    f = plt.figure(figsize=(3*sx, 3*sy))
+    for cc in range(NC):
+        plt.subplot(sx,sy,cc+1)
+        plt.plot(t1[:, cc], 'k')
+        plt.plot(t2[:, cc], 'r')
+        plt.xlim(*bins)
+        plt.axis('tight')
+        plt.axis('off')
+        plt.title(cc)
+    plt.tight_layout()
+    return t1, t2, f
+    
+    
+def plot_transientsC_new(model, val_dl, cids, bins=(-40, 100), filter=True, smooth=0, r2_score=False, topk=None, cid_idx=None, plot=True):
     assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
     assert issubclass(type(model), nn.Module), "model must be a nn.Module"
     assert len(cids) > 0, "cids must be a list of channel ids"
@@ -305,10 +402,12 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smoot
         transientY = signal.savgol_filter(transientY, window_length=smooth, polyorder=1, axis=0)
         transientY_hat = signal.savgol_filter(transientY_hat, window_length=smooth, polyorder=1, axis=0)
     
+    if not plot:
+        return transientY, transientY_hat, None
     NC = transientY.shape[-1]
     sx = int(np.ceil(np.sqrt(NC)))
     sy = int(np.round(np.sqrt(NC)))
-   
+
     f = plt.figure(figsize=(3*sx, 3*sy))
     for cc in range(NC):
         plt.subplot(sx,sy,cc+1)
@@ -358,7 +457,7 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 60), filter=True, smoot
 #     plt.figure()
 #     _ = plt.plot(bins, np.mean(binnedY, axis=0))
 #     plt.xlabel("Time from saccade onset (ms)")
-
+        
 
 def plot_transientsC(model, val_dl, cids, num_lags):
     # val_dl must have batch size 1 and ds must have use_blocks = False

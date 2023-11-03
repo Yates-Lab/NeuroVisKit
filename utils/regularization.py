@@ -308,6 +308,10 @@ class proximalL1(ProximalPnorm):
             out = torch.sign(x) * (torch.abs(x) - self.coefficient*self.lr).clamp(min=0)
             self.target.data = out
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
+
+class proximalP05(ProximalPnorm):
+    def __init__(self, coefficient=1e-1, target=None, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, p=0.5, **kwargs)
         
 class proximalL2(ProximalPnorm):
     def __init__(self, coefficient=1e-2, target=None, **kwargs):
