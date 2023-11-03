@@ -1,4 +1,5 @@
 import os, dill, sys, shutil, json, io, contextlib
+from tkinter import NO
 import re
 from typing import Any, Callable, Optional, Union
 from lightning.pytorch.core.optimizer import LightningOptimizer
@@ -26,83 +27,133 @@ logging.getLogger("pytorch_lightning.utilities.rank_zero").addHandler(logging.Nu
 torch.set_float32_matmul_precision("medium")
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
-class EvalModule:
+class EvalModule(nn.Module):
     """Module that evaluates the log-likelihood of a model on a given dataset.
-    This is used for trainers that have a built in validation loop. Otherwise you can use an end-to-end alternative that loops through the data.
+    This is used for training.
     """
-    def __init__(self, unit_loss, cids):
-        self.loss = unit_loss
+    def __init__(self, cids):
+        super().__init__()
         self.cids = cids
-        self.tsum, self.rsum, self.llsum = 0, 0, 0
+        self.LLnull, self.LLsum, self.nspikes = 0, 0, 0
     def reset(self):
-        self.tsum, self.rsum, self.llsum = 0, 0, 0
-    def step(self, x, rpred):
-        self.llsum += self.loss(
-            rpred,
-            x["robs"][:, self.cids],
-            data_filters=x["dfs"][:, self.cids],
-            temporal_normalize=False
-        )
-        self.tsum += x["dfs"][:, self.cids].sum(dim=0)
-        self.rsum += (x["dfs"][:, self.cids]*x["robs"][:, self.cids]).sum(dim=0)
+        self.LLnull, self.LLsum, self.nspikes = 0, 0, 0
+    def startDS(self, train_ds=None, means=None):
+        if means is not None:
+            self.register_buffer("mean_spikes", means)
+        elif train_ds is not None:
+            if hasattr(train_ds, 'covariates'):
+                sum_spikes = (train_ds.covariates["robs"][:, self.cids] * train_ds.covariates["dfs"][:, self.cids]).sum(dim=0)
+                total_valid = train_ds.covariates["dfs"][:, self.cids].sum(dim=0)
+            else:
+                device = next(iter(train_ds))["robs"].device
+                sum_spikes = torch.zeros(len(self.cids), device=device)
+                total_valid = torch.zeros(len(self.cids), device=device)
+                for b in train_ds:
+                    sum_spikes = sum_spikes + (b["dfs"][:, self.cids] * b["robs"][:, self.cids]).sum(dim=0)
+                    total_valid = total_valid + b["dfs"][:, self.cids].sum(dim=0)
+            self.register_buffer("mean_spikes", sum_spikes / total_valid)
+        else:
+            raise ValueError("Either train_ds or means must be provided.")
+    def getLL(self, pred, batch):
+        poisson_ll = batch["robs"][:, self.cids] * torch.log(pred + 1e-8) - pred
+        return (poisson_ll * batch["dfs"][:, self.cids]).sum(dim=0)
+    def __call__(self, rpred, batch):
+        if not hasattr(self, 'mean_spikes'):
+            print("(ignore if just sanity checking) mean_spikes not initialized. Call startDS first.")
+            return
+        llsum = self.getLL(rpred, batch).cpu()
+        llnull = self.getLL(self.mean_spikes.to(rpred.device).expand(*rpred.shape), batch).cpu()
+        self.LLnull = self.LLnull + llnull
+        self.LLsum = self.LLsum + llsum
+        self.nspikes = self.nspikes + (batch["dfs"][:, self.cids] * batch["robs"][:, self.cids]).sum(dim=0).cpu()
+        del llsum, llnull, rpred, batch
     def closure(self):
-        assert type(self.llsum) is not int, "EvalModule has not been called yet"
-        assert type(self.tsum) is not int, "EvalModule has not been called yet"
-        assert type(self.rsum) is not int, "EvalModule has not been called yet"
-        zeros = torch.where((self.rsum == 0))[0].tolist() #check for zeros
+        if type(self.LLnull) is int:
+            print("(ignore if just sanity checking) EvalModule has not been called yet")
+            return torch.tensor(0.0)
+        zeros = torch.where((self.LLsum == 0))[0].tolist() #check for zeros
         if zeros:
             print(f"(ignore if just sanity checking) no spikes detected for neurons {zeros}. Check your cids, data and datafilters.")
             self.reset()
             return torch.tensor(0.0)
-        LLneuron = self.llsum/self.rsum.clamp(1)
-        rbar = self.rsum/self.tsum.clamp(1)
-        LLnulls = torch.log(rbar)-1
-        LLneuron = -LLneuron - LLnulls
-        LLneuron/=np.log(2)
-        return LLneuron
+        return (self.LLsum - self.LLnull)/self.nspikes.clamp(1)/np.log(2)
+    
+# class EvalModule:
+#     """Module that evaluates the log-likelihood of a model on a given dataset.
+#     This is used for trainers that have a built in validation loop. Otherwise you can use an end-to-end alternative that loops through the data.
+#     """
+#     def __init__(self, cids):
+#         self.cids = cids
+#         self.tsum, self.rsum, self.llsum = 0, 0, 0
+#     def reset(self):
+#         self.tsum, self.rsum, self.llsum = 0, 0, 0
+#     def step(self, x, rpred):
+#         self.llsum += self.loss(
+#             rpred,
+#             x["robs"][:, self.cids],
+#             data_filters=x["dfs"][:, self.cids],
+#             temporal_normalize=False
+#         )
+#         self.tsum += x["dfs"][:, self.cids].sum(dim=0)
+#         self.rsum += (x["dfs"][:, self.cids]*x["robs"][:, self.cids]).sum(dim=0)
+#     def closure(self):
+#         assert type(self.llsum) is not int, "EvalModule has not been called yet"
+#         assert type(self.tsum) is not int, "EvalModule has not been called yet"
+#         assert type(self.rsum) is not int, "EvalModule has not been called yet"
+#         zeros = torch.where((self.rsum == 0))[0].tolist() #check for zeros
+#         if zeros:
+#             print(f"(ignore if just sanity checking) no spikes detected for neurons {zeros}. Check your cids, data and datafilters.")
+#             self.reset()
+#             return torch.tensor(0.0)
+#         LLneuron = self.llsum/self.rsum.clamp(1)
+#         rbar = self.rsum/self.tsum.clamp(1)
+#         LLnulls = torch.log(rbar)-1
+#         LLneuron = -LLneuron - LLnulls
+#         LLneuron/=np.log(2)
+#         return LLneuron
 
-class TrainEvalModule(nn.Module):
-    """Module that evaluates the log-likelihood of a model on a given dataset.
-    This is used for training.
-    """
-    def __init__(self, unit_loss, cids):
-        super().__init__()
-        self.loss = unit_loss
-        self.cids = cids
-    def start(self, train_dataloader):
-        self.train_dataloader = train_dataloader
-        sum_spikes, count = 0, 0
-        for b in tqdm.tqdm(train_dataloader, desc="Preparing normalization for loss."):
-            count = count + b["dfs"][:, self.cids].sum(dim=0)
-            sum_spikes = sum_spikes + (b["dfs"][:, self.cids]*b["robs"][:, self.cids]).sum(dim=0)
-        assert all(count > 1), "Some neurons have no data. Check your cids, data and datafilters."
-        self.register_buffer("mean_spikes", (sum_spikes/count).unsqueeze(0))
-    def __call__(self, rpred, batch):
-        device = rpred.device
-        llsum = self.loss(
-            rpred,
-            batch["robs"][:, self.cids],
-            data_filters=batch["dfs"][:, self.cids],
-            temporal_normalize=False
-        )
+# class TrainEvalModule(nn.Module):
+#     """Module that evaluates the log-likelihood of a model on a given dataset.
+#     This is used for training.
+#     """
+#     def __init__(self, unit_loss, cids):
+#         super().__init__()
+#         self.loss = unit_loss
+#         self.cids = cids
+#     def start(self, train_dataloader):
+#         self.train_dataloader = train_dataloader
+#         sum_spikes, count = 0, 0
+#         for b in tqdm.tqdm(train_dataloader, desc="Preparing normalization for loss."):
+#             count = count + b["dfs"][:, self.cids].sum(dim=0)
+#             sum_spikes = sum_spikes + (b["dfs"][:, self.cids]*b["robs"][:, self.cids]).sum(dim=0)
+#         assert all(count > 1), "Some neurons have no data. Check your cids, data and datafilters."
+#         self.register_buffer("mean_spikes", (sum_spikes/count).unsqueeze(0))
+#     def __call__(self, rpred, batch):
+#         device = rpred.device
+#         llsum = self.loss(
+#             rpred,
+#             batch["robs"][:, self.cids],
+#             data_filters=batch["dfs"][:, self.cids],
+#             temporal_normalize=False
+#         )
 
-        llnull = self.loss(
-            self.mean_spikes.to(device).expand((len(batch["robs"]), -1)),
-            batch["robs"][:, self.cids],
-            data_filters=batch["dfs"][:, self.cids],
-            temporal_normalize=False
-        )
+#         llnull = self.loss(
+#             self.mean_spikes.to(device).expand((len(batch["robs"]), -1)),
+#             batch["robs"][:, self.cids],
+#             data_filters=batch["dfs"][:, self.cids],
+#             temporal_normalize=False
+#         )
 
-        robs = batch["robs"][:, self.cids] * batch["dfs"][:, self.cids]
-        LLneuron = (llsum - llnull)/robs.sum(0).clamp(1)
+#         robs = batch["robs"][:, self.cids] * batch["dfs"][:, self.cids]
+#         LLneuron = (llsum - llnull)/robs.sum(0).clamp(1)
 
-        # spike_sum = (batch["dfs"][:, self.cids]*batch["robs"][:, self.cids]).sum(dim=0)
-        # LLneuron = llsum/spike_sum.clamp(1)
-        # LLnulls = torch.log(self.mean_spikes)-1
-        # device = spike_sum.device
-        # LLneuron = -LLneuron.to(device) - LLnulls.to(device)
-        LLneuron/=np.log(2)
-        return LLneuron
+#         # spike_sum = (batch["dfs"][:, self.cids]*batch["robs"][:, self.cids]).sum(dim=0)
+#         # LLneuron = llsum/spike_sum.clamp(1)
+#         # LLnulls = torch.log(self.mean_spikes)-1
+#         # device = spike_sum.device
+#         # LLneuron = -LLneuron.to(device) - LLnulls.to(device)
+#         LLneuron/=np.log(2)
+#         return LLneuron
     
 class PLWrapper(pl.LightningModule):
     def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=PreprocessFunction(), normalize_loss=False, optimizer_kwargs={}):
@@ -116,9 +167,11 @@ class PLWrapper(pl.LightningModule):
         self.preprocess_data = preprocess_data
         assert hasattr(self.wrapped_model, 'cids'), "model must have cids attribute"
         self.cids = self.wrapped_model.cids
-        self.eval_module = EvalModule(self.loss.unit_loss, self.cids)
+        self.register_buffer("per_neuron_loss", torch.zeros((len(self.cids)),))
+        self.eval_module = EvalModule(self.cids)
         if normalize_loss:
-            self.train_eval_module = TrainEvalModule(self.loss.unit_loss, self.cids)
+            raise NotImplementedError("normalize_loss is not implemented yet")
+            # self.train_eval_module = TrainEvalModule(self.loss.unit_loss, self.cids)
         self.save_hyperparameters(ignore=['wrapped_model', 'preprocess_data'])
         if hasattr(self.wrapped_model, 'lr'):
             self.wrapped_model.lr = self.learning_rate
@@ -146,6 +199,7 @@ class PLWrapper(pl.LightningModule):
             self.train_eval_module.start(self.trainer.train_dataloader)
         if hasattr(self.model, 'on_train_start'):
             self.model.on_train_start(self)
+        self.eval_module.startDS(train_ds=self.trainer.train_dataloader)
         return super().on_train_start()
     
     def on_train_end(self):
@@ -179,8 +233,10 @@ class PLWrapper(pl.LightningModule):
     def validation_step(self, x, batch_idx=0, dataloader_idx=0):
         x = self.preprocess_data(x)
         losses = self.wrapped_model.validation_step(x)
-        self.eval_module.step(x, self(x))
+        self.eval_module(self(x), x)
         self.log("val_loss_poisson", losses["val_loss"], prog_bar=True, on_epoch=True, batch_size=len(x["stim"]))
+        if hasattr(self.model, 'on_validation_step'):
+            self.model.on_validation_step(self)
         del x
         return losses["val_loss"]
     
@@ -190,7 +246,11 @@ class PLWrapper(pl.LightningModule):
     
     def on_validation_epoch_end(self) -> None:
         if self.opt != torch.optim.LBFGS:
-            self.log("val_loss", -1*torch.mean(self.eval_module.closure()), prog_bar=True, on_epoch=True)
+            loss = self.eval_module.closure()
+            self.per_neuron_loss = loss.detach()
+            self.log("val_loss", -1*torch.mean(loss), prog_bar=True, on_epoch=True)
+        if hasattr(self.model, 'on_validation_epoch_end'):
+            self.model.on_validation_epoch_end(self)
         with torch.no_grad():
             self._logging()
     

@@ -363,7 +363,41 @@ def plot_transientsC_multiDS(ds1, ds2, bins=(-40, 100), filter=True, smooth=0):
         plt.title(cc)
     plt.tight_layout()
     return t1, t2, f
-    
+
+def calculate_transient_r2(model, val_dl, cids, bins=(-40, 100), filter=True, smooth=0):
+    assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
+    assert issubclass(type(model), nn.Module), "model must be a nn.Module"
+    assert len(cids) > 0, "cids must be a list of channel ids"
+    assert len(bins) == 2, "bins must be a tuple of length 2"
+    # assert model_device(model) == dl_device(val_dl), "Model and data must be on same device"
+    assert hasattr(val_dl.dataset, 'covariates'), "val_dl.dataset must have covariates"
+    device = model_device(model)
+    N = sum([len(batch['sac_on']) for batch in val_dl])
+    sac_on = torch.zeros((N, 1), dtype=torch.bool, device=device)
+    Y = torch.zeros(N, len(cids), dtype=torch.float32, device=device)
+    Y_hat = torch.zeros(N, len(cids), dtype=torch.float32, device=device)
+    with torch.no_grad():
+        i = 0
+        for batch in tqdm(val_dl, desc="Preparing for transient computation."):
+            b = len(batch['stim'])
+            for k in batch.keys():
+                batch[k] = batch[k].to(device)
+            sac_on[i:i+b] = batch['sac_on']
+            Y[i:i+b] = batch['robs'][:, cids]
+            Y_hat[i:i+b] = model(batch)
+            if filter:
+                Y[i:i+b] *= batch['dfs'][:, cids]
+            i += b
+    inds = torch.where(sac_on)[0].to(device)
+    del sac_on
+    transientY = event_triggered_op(Y, inds, bins, reduction=torch.mean).cpu().numpy()
+    del Y
+    transientY_hat = event_triggered_op(Y_hat, inds, bins, reduction=torch.mean).cpu().numpy()
+    if smooth:
+        transientY = signal.savgol_filter(transientY, window_length=smooth, polyorder=1, axis=0)
+    sortby = np.argsort(np.nanstd(transientY, axis=0))[::-1]
+    r2_score = r2_numpy(transientY, transientY_hat, dim=0)
+    return r2_score[sortby], sortby
     
 def plot_transientsC_new(model, val_dl, cids, bins=(-40, 100), filter=True, smooth=0, r2_score=False, topk=None, cid_idx=None, plot=True):
     assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
@@ -400,7 +434,7 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 100), filter=True, smoo
     if smooth:
         #use savgol filter
         transientY = signal.savgol_filter(transientY, window_length=smooth, polyorder=1, axis=0)
-        transientY_hat = signal.savgol_filter(transientY_hat, window_length=smooth, polyorder=1, axis=0)
+        # transientY_hat = signal.savgol_filter(transientY_hat, window_length=smooth, polyorder=1, axis=0)
     
     if not plot:
         return transientY, transientY_hat, None
