@@ -132,6 +132,47 @@ def plot_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     return fig
     
+def plot_split_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs):
+    '''
+        Plot a grid of figures such that each subfigure has m subplots.
+        mat is a list of lists of image data (n, m, x, y)
+        titles is a list of titles of length n.
+    '''
+    n = len(mat)
+    m = len(mat[0])
+    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(m, n))
+    
+    for i in tqdm(range(n), desc=desc):
+        for j in range(m):
+            img = mat[i][j]
+            #the following is a patch to fix an indexing error in matplotlib
+            if n == 1:
+                axs = axes[j]
+            elif m == 1:
+                axs = axes[i]
+            else:
+                axs = axes[i, j]
+            axs.imshow(img, vmin=vmin, vmax=vmax, interpolation='none')
+            # axs.axis('off')
+            axs.set_xticks([])
+            axs.set_yticks([])
+            if j >= m//2:
+                for spine in axs.spines.values():
+                    spine.set_edgecolor('blue')
+                    spine.set_linewidth(2)
+            else:
+                for spine in axs.spines.values():
+                    spine.set_edgecolor('red')
+                    spine.set_linewidth(2)
+            if titles is not None:
+                axs.set_title(titles[i])
+    
+    for key in kwargs:
+        eval(f'plt.{key}')(kwargs[key])
+        
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    return fig
+
 def eval_gratings(model, device='cpu', alpha=1, shape=(35, 35, 24), fs=None):
     '''
     Evaluate the model on cosine gratings.

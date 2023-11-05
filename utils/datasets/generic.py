@@ -78,7 +78,7 @@ class ContiguousDataset(GenericDataset):
             data, blocks = [], []
             block = 0
             for i in inds:
-                data.append(self[i])
+                data.append(self[int(i)])
                 block_len = self.block[i][1] - self.block[i][0]
                 blocks.append((block, block + block_len))
                 block += block_len

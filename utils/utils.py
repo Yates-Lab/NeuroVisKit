@@ -304,8 +304,11 @@ def plot_transientsC_singleModel(model, val_dl, bins=(-40, 100), smooth=0, split
             Y_hat[i:i+b] = model(batch)
             i += b
     inds = torch.where(sac_on)[0].to(device)
+    binsize = 1/240
+    nsacs = len(inds)
     del sac_on
-    transientY_hat = event_triggered_op(Y_hat, inds, bins, reduction=torch.mean).cpu().numpy()
+    transientY_hat = event_triggered_op(Y_hat, inds, bins, reduction=torch.sum).cpu().numpy()
+    transientY_hat = transientY_hat/nsacs/binsize
     if smooth:
         #use savgol filter
         transientY_hat = signal.savgol_filter(transientY_hat, window_length=smooth, polyorder=1, axis=0)
@@ -426,10 +429,14 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 100), filter=True, smoo
                 Y[i:i+b] *= batch['dfs'][:, cids][:, cid_idx]
             i += b
     inds = torch.where(sac_on)[0].to(device)
+    nsacs = len(inds)
     del sac_on
-    transientY = event_triggered_op(Y, inds, bins, reduction=torch.mean).cpu().numpy()
+    transientY = event_triggered_op(Y, inds, bins, reduction=torch.sum).cpu().numpy()
     del Y
-    transientY_hat = event_triggered_op(Y_hat, inds, bins, reduction=torch.mean).cpu().numpy()
+    transientY_hat = event_triggered_op(Y_hat, inds, bins, reduction=torch.sum).cpu().numpy()
+    binsize = 1/240
+    transientY = transientY/nsacs/binsize
+    transientY_hat = transientY_hat/nsacs/binsize
     
     if smooth:
         #use savgol filter
