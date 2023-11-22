@@ -12,8 +12,6 @@ import matplotlib.pyplot as plt
 import torch
 import dill
 from copy import deepcopy
-from NeuroVisKit.utils.datasets import Pixel, FixationMultiDataset
-from NeuroVisKit.utils.datasets.utils import get_stim_list, plot_shifter
 from NeuroVisKit.utils.plotting import plot_stas
 # from NDNT.utils import get_max_samples, load_model
 # from NDNT.training import Trainer, EarlyStopping

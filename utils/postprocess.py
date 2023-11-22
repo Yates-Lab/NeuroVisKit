@@ -1,5 +1,4 @@
 #%%
-from cv2 import mean
 import dill
 import os
 import torch
@@ -11,671 +10,41 @@ import matplotlib
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from . import utils
-from .mei import irf, get_gratings, irfC
-from .cluster import corr_dist, cos_dist
 from .utils import to_device
-from scipy.signal import find_peaks
 import torch.nn as nn
+from NeuroVisKit.utils.mei import irfC, irf
 
-import torch.nn as nn
+#this makes sure if we move stuff around, users dont need to change imports.
+from NeuroVisKit._utils.postprocess import *
+from NeuroVisKit.utils.plotting import plot_grid, plot_model_conv, plot_split_grid
 
-def unique(x):
-    #maintain order unlike list(set(x))
-    out = []
-    for i in x:
-        if i not in out:
-            out.append(i)
-    return out
-
-def get_conv_submodules(module, parent_has_weight=False):
-    submodules = []
-    # Check if the current module has a "weight" property
-    has_weight = hasattr(module, 'weight') and (issubclass(type(module), nn.modules.conv._ConvNd) or ("conv" in type(module).__name__.lower()))
-    # If the parent or the current module has a "weight" property, don't traverse its children
-    if parent_has_weight or has_weight:
-        return [module]
-    # Otherwise, traverse its children
-    for child in module.children():
-        submodules.extend(get_conv_submodules(child, has_weight))
-    return unique(submodules)
-
-def get_model_conv_weights(model):
-    '''
-        Get the weights of the convolutional layers of a model.
-        Returns a list of lists of weights.
-    '''
-    weights = []
-    for module in model.modules():
-        # check if convolutional layer
-        if issubclass(type(module), nn.modules.conv._ConvNd):
-            weights.append(module.weight.data.cpu().numpy())
-    return weights
-
-def plot_model_conv(model):
-    f = []
-    i = 0
-    submods = get_conv_submodules(model)
-    for module in submods: #model.modules()
-        # check if convolutional layer
-        # if issubclass(type(module), nn.modules.conv._ConvNd):
-        w = module.weight.detach().data.cpu().numpy()
-        if len(w.shape) == 5: # 3d conv (cout, cin, x, y, t)
-            w = w.squeeze(1) # asume cin is 1
-            w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize all |xyt (1, 2, 3)
-        elif len(w.shape) == 4: # 2d conv (cout, cin, x, y)
-            w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize all |cin xy (1, 2, 3)
-        # shape is (cout, cin, x, y)
-        titles = ['cout %d'%i for i in range(w.shape[0])]
-        ft = plot_grid(w, titles=titles, suptitle='Layer %d'%i, desc='Layer %d'%i, vmin=-1, vmax=1)
-        i += 1
-        f.append(ft)
-    return f
-            
-class Loader():
-    def __init__(self, ds, cyclic=True, shuffled=False):
-        self.ds = ds
-        self.inds = np.arange(len(ds))
-        if shuffled:
-            np.random.shuffle(self.inds)
-        self.iter = cycle if cyclic else iter
-        self.loader = self.iter(self.inds)
-    def __next__(self):
-        return self.ds[next(self.loader)]
-    def reset(self):
-        self.loader = self.iter(self.inds)
-
-class Grad():
-    def __init__(self, grads):
-        self.grads = grads
-    def __getitem__(self, key):
-        return self.grads[key]
-    def abs(self):
-        return Grad([g.abs() for g in self.grads])    
-    def __div__(self, other):
-        return Grad([g/other for g in self.grads])
-    def __mul__(self, other):
-        return Grad([g*other for g in self.grads])
-    def __add__(self, other):
-        return Grad([g+other for g in self.grads])
-    def __sub__(self, other):
-        return Grad([g-other for g in self.grads])
-
-def plot_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs):
-    '''
-        Plot a grid of figures such that each subfigure has m subplots.
-        mat is a list of lists of image data (n, m, x, y)
-        titles is a list of titles of length n.
-    '''
-    n = len(mat)
-    m = len(mat[0])
-    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(m, n))
-    
-    for i in tqdm(range(n), desc=desc):
-        for j in range(m):
-            img = mat[i][j]
-            #the following is a patch to fix an indexing error in matplotlib
-            if n == 1:
-                axs = axes[j]
-            elif m == 1:
-                axs = axes[i]
-            else:
-                axs = axes[i, j]
-                
-            axs.imshow(img, vmin=vmin, vmax=vmax, interpolation='none')
-            axs.axis('off')
-            if titles is not None:
-                axs.set_title(titles[i])
-    
-    for key in kwargs:
-        eval(f'plt.{key}')(kwargs[key])
-        
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    return fig
-    
-def plot_split_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs):
-    '''
-        Plot a grid of figures such that each subfigure has m subplots.
-        mat is a list of lists of image data (n, m, x, y)
-        titles is a list of titles of length n.
-    '''
-    n = len(mat)
-    m = len(mat[0])
-    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(m, n))
-    
-    for i in tqdm(range(n), desc=desc):
-        for j in range(m):
-            img = mat[i][j]
-            #the following is a patch to fix an indexing error in matplotlib
-            if n == 1:
-                axs = axes[j]
-            elif m == 1:
-                axs = axes[i]
-            else:
-                axs = axes[i, j]
-            axs.imshow(img, vmin=vmin, vmax=vmax, interpolation='none')
-            # axs.axis('off')
-            axs.set_xticks([])
-            axs.set_yticks([])
-            if j >= m//2:
-                for spine in axs.spines.values():
-                    spine.set_edgecolor('blue')
-                    spine.set_linewidth(2)
-            else:
-                for spine in axs.spines.values():
-                    spine.set_edgecolor('red')
-                    spine.set_linewidth(2)
-            if titles is not None:
-                axs.set_title(titles[i])
-    
-    for key in kwargs:
-        eval(f'plt.{key}')(kwargs[key])
-        
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    return fig
-
-def eval_gratings(model, device='cpu', alpha=1, shape=(35, 35, 24), fs=None):
-    '''
-    Evaluate the model on cosine gratings.
-    alpha: scaling factor for the gratings (0, 1]
-    fs: frequency samples for each dimension
-    '''
-    if fs is None:
-        fs = shape
-    fx = np.linspace(0, 0.5, fs[0])
-    fy = np.linspace(0, 0.5, fs[1])
-    ft = np.linspace(0, 0.5, fs[2])
-    frequencies = np.stack(np.meshgrid(fx, fy, ft), -1).reshape(-1, 3)
-    evals, phases = [], []
-    for ind, freq_ind in enumerate(frequencies):
-        freqs, gratings = get_gratings(shape, *np.array(freq_ind).reshape(3, 1))
-        gratings = torch.tensor(gratings, device=device).reshape(-1, *shape)
-        model.to(device)
-        out = model({"stim": gratings*alpha})
-        mx, amx = out.max(0)
-        phases.append(freqs[amx.cpu(), 3:])
-        evals.append(mx.detach().cpu())
-        frequencies[ind] = freqs[0, :3]
-        del out, freqs, gratings, mx, amx
-        print(f'{ind+1} / {frequencies.shape[0]}')
-        
-    return frequencies.reshape(*fs, 3), np.stack(phases, 1).reshape(-1, *fs, 3), torch.stack(evals).reshape(*fs, -1).detach().numpy()
-
-def csf_kernel_from_activations(phases, activations, shape=(35, 35, 24), fs=None):
-    if fs is None:
-        fs = shape
-    x = np.arange(shape[0])
-    y = np.arange(shape[1])
-    t = np.arange(shape[2])
-    fx = np.linspace(0, 0.5, fs[0])
-    fy = np.linspace(0, 0.5, fs[1])
-    ft = np.linspace(0, 0.5, fs[2])
-    X, Y, T = np.stack(np.meshgrid(x, y, t)).reshape(3, *shape, 1)
-    frequencies = np.stack(np.meshgrid(fx, fy, ft), -1).reshape(-1, 3)
-    phases = phases.reshape(phases.shape[1], -1, 3)
-    out_kernel = np.zeros((shape[0], shape[1], shape[2], activations.shape[-1]))  
-    activations = activations.reshape(-1, activations.shape[-1]) 
-    for ind, freq_ind in enumerate(frequencies):
-        FX, FY, FT = freq_ind
-        PHIx, PHIy, PHIt = phases[:, ind].T.reshape(3, 1, 1, 1, -1)
-        new_kernel = np.cos(2*np.pi*FX*X+PHIx)*np.cos(2*np.pi*FY*Y+PHIy)*np.cos(2*np.pi*FT*T+PHIt)
-        out_kernel += new_kernel*activations[ind]
-    return out_kernel.reshape(*shape, -1)
-
-
-def plot_contour_peaks(axs, n=1):
-    contours = [i for i in axs.get_children() if type(i) == matplotlib.collections.PathCollection]
-    levels = [[path._vertices.mean(0).tolist() for path in cont._paths] for cont in contours][::-1]
-    lengths = [len(i) for i in levels]
-    levels_n = [levels[i] for i in range(1, len(levels)) if lengths[i]>max(lengths[:i])]
-    zero = np.array(levels[0]).reshape(-1, 2)
-    for i in range(len(levels_n)):
-        current = levels_n[i]
-        dists = [min(np.linalg.norm(zero-j, axis=1)) for j in current]
-        inds = np.argsort(dists)[::-1][:len(current)-len(levels[0])]
-        levels_n[i] = [current[ind] for ind in inds]
-    levels = [levels[0]] + [i for i in levels_n if len(i)>0]
-    levels = np.concatenate(levels[:min(n, len(levels))], 0)
-    axs.scatter(*levels.T, c='black')
-    return levels
-
-def hist_peaks(distances, to_plot=False, **kwargs):
-    if to_plot:
-        plt.figure()
-        counts, bins, _ = plt.hist(distances, **kwargs)
-    else:
-        counts, bins = np.histogram(distances, **kwargs)
-    mid_bins = (bins[1:] + bins[:-1])/2
-    peaks, _ = find_peaks(counts, height=counts.max()/8)
-    return peaks, mid_bins[peaks], counts[peaks]
-
-# def eucl(x, y):
-#     out = x.dot(y)
-#     norm = (x.dot(x) * y.dot(y))**0.5
-#     return out/norm/2 + 0.5
-
-def get_peak_irfs(irfs):
-    dists_eucl, dists_corr = [], []
-    for i in irfs[1:]:
-        dists_eucl.append(cos_dist(i, irfs[0]))
-        dists_corr.append(corr_dist(i, irfs[0]))
-    dists_eucl = np.array(dists_eucl)
-    dists_corr = np.array(dists_corr)
-    eucl_hist_peaks = hist_peaks(dists_eucl, bins=20)
-    corr_hist_peaks = hist_peaks(dists_corr, bins=20)
-    eucl_irfs, corr_irfs = [], []
-    for i in eucl_hist_peaks[1]:
-        eucl_irfs.append(irfs[np.argmin(np.abs(dists_eucl - i))])
-    for i in corr_hist_peaks[1]:
-        corr_irfs.append(irfs[np.argmin(np.abs(dists_corr - i))])
-    states = f'{eucl_hist_peaks[0].shape[0]} eucl states, {corr_hist_peaks[0].shape[0]} corr states'
-    return {
-        'peaks': (eucl_hist_peaks, corr_hist_peaks),
-        'irfs': (eucl_irfs, corr_irfs),
-        'zero': irfs[0],
-        'num_states': (eucl_hist_peaks[0].shape[0], corr_hist_peaks[0].shape[0]),
-        'string': states
-    }
-    
-def get_zero_irf(input_dims, model, cid, device='cpu', nobatch=False):
-    dims = input_dims if nobatch else (1, *input_dims)
-    return irf(
-        {
-            "stim":
-                torch.zeros(dims, device=device)
-        }, model, [cid]).detach().cpu().squeeze(0)
-    
-def get_zero_irfC(input_dims, model, cid, device='cpu'):
+def get_zero_irfC(input_dims, model, neuron_inds=None, device='cpu'):
     rf = irfC(
-        {
-            "stim":
-                torch.zeros(input_dims, device=device)
-        }, model, [cid], input_dims[0])[0]
+        torch.zeros(input_dims, device=device),
+        model,
+        neuron_inds=neuron_inds,
+    )
     return rf.detach().cpu()
 
-def generate_irfs(val_dl, model, cids, path=None, zero=False, device='cpu'):
-    '''
-        Generates IRFs for a given neuron id, model and dataset
-        saves the IRFs to path if provided
-        Includes the IRF for when input is all zeros if zero=True
-    '''
-    irfs = []
-    for batch in tqdm(val_dl):
-        irfs.append(irf(batch, model, cids).detach().cpu())
-    if zero:
-        irfs.insert(0, irf(
-            {
-                "stim":
-                    torch.zeros((1, irfs[0].shape[-1]), device=device)
-            }, model, cids).detach().cpu())
-    irfs = torch.cat(irfs, dim=0)
-    if path is not None:
-        torch.save(irfs, path)
-    return irfs
-    
-def zscoreWeights(w):
-    w_mean = np.mean(w, axis=(0, 1, 2), keepdims=True)
-    w_std = np.std(w, axis=(0, 1, 2), keepdims=True)
-    w_normed = (w - w_mean) / w_std
-    return w_normed
-
-def eval_model_dist(dirname, nsamples_train=None, nsamples_val=None, device=torch.device('cpu')):
-    train_data, val_data = utils.unpickle_data(nsamples_train=nsamples_train, nsamples_val=nsamples_val)
-    train_dl, val_dl, train_ds, val_ds = utils.get_datasets(train_data, val_data, device=device, batch_size=1)
-
-    evals = []
-    for i in range(100):
-        print(f'Started {i}')
-        folderName = f'checkpoint_{i}'# 'goodmodel_20'
-        with open(os.path.join(dirname, folderName, 'model.pkl'), 'rb') as f:
-            model = dill.load(f)
-        model.to(device)
-        evals.append(eval_model_fast(model, val_dl))
-        print(evals[-1])
-
-    dill.dump(evals, open(os.path.join(dirname, 'evals.pkl'), 'wb'))
-
-def plot_model_dist(dirname):
-    evals = dill.load(open(os.path.join(dirname, 'evals.pkl'), 'rb'))
-    evals = np.array(evals)
-    mxs = evals.max(1)
-    mns = evals.min(1)
-    rngs = mxs - mns
-    mds = np.median(evals, axis=1)
-    
-    means = evals.mean(1)
-    plt.figure(figsize=(10, 10))
-    plt.suptitle('Distribution of Model Over Random Inits')
-
-    # plt.subplot(2, 2, 1)
-    # plt.hist(mns, density=True)
-    # plt.title('Min Score Dist')
-    # plt.ylabel('Density')
-    # plt.xlabel('Min Score')
-
-    plt.subplot(2, 2, 1)
-    plt.hist(rngs, density=True)
-    plt.title('Score Range Dist (max - min)')
-    plt.ylabel('Density')
-    plt.xlabel('Score Range')
-
-    plt.subplot(2, 2, 2)
-    plt.hist(mxs, density=True)
-    plt.title('Max Score Dist')
-    plt.ylabel('Density')
-    plt.xlabel('Max Score')
-
-    plt.subplot(2, 2, 3)
-    plt.hist(means, density=True)
-    plt.title('Mean Score Dist')
-    plt.ylabel('Density')
-    plt.xlabel('Mean Score')
-    
-    plt.subplot(2, 2, 4)
-    plt.hist(mds, density=True)
-    plt.title('Median Score Dist')
-    plt.ylabel('Density')
-    plt.xlabel('Median Score')
-
-    plt.tight_layout()
-
-    bins = np.linspace(-0.4, 1, 15)
-    plt.figure(figsize=(10, 5))
-    plt.suptitle('Distribution of Scores for Each Model')
-    
-    plt.subplot(1, 2, 1)
-    for i in range(100):
-        plt.hist(evals[i], density=True, alpha=0.1, color='black', bins=bins)
-    plt.title('Predetermined Bins')
-    plt.ylabel('Density')
-    plt.xlabel('Score')
-
-    plt.subplot(1, 2, 2)
-    for i in range(100):
-        plt.hist(evals[i], density=True, alpha=0.1, color='black')
-    plt.title('Fuzzy')
-    plt.ylabel('Density')
-    plt.xlabel('Score')
-
-    return evals
-
-def next_XY(loader, cids):
-    x = next(loader)
-    return x, x['robs'][..., cids]
-
-def get_layer_grad(core, layer_i):
-    layer = core[layer_i]
-    grads = layer.weight.grad
-    if grads == None:
-        return None
-    num_filts = grads.shape[-1]
-    return grads.detach().reshape(layer.filter_dims + [num_filts]).squeeze()
-
-def forward_back(loader, model, cids, loss=True, neuron=None):
-    model.zero_grad()
-    if loss:
-        X, Y = next_XY(loader, cids)
-        Y_hat = model(X)
-        loss = model.loss(Y_hat, Y, data_filters=X["dfs"][..., cids])
-        loss.backward()
-    else:
-        y = model(next(loader))
-        if neuron == None:
-            torch.mean(y).backward()
-        else:
-            y[0, neuron].backward()    
-
-def grad_sum_layer(model, core, loader, layer_i, device, cids, nsamples=1000, loss=True):
-    grads = torch.zeros(*core[layer_i].get_weights().shape, device=device)
-    for i in range(nsamples):
-        forward_back(loader, model, cids, loss)
-        grads += torch.abs(get_layer_grad(core, layer_i))
-    return grads / nsamples
-
-def grad_sum(model, core, loader, device, cids, nsamples=1000, loss=True):
-    grads = [torch.zeros(*core[i].get_weights().shape, device=device) for i in range(len(core))]
-    for i in range(nsamples):
-        forward_back(loader, model, cids, loss)
-        for layer_i in range(len(core)):
-            grads[layer_i] += torch.abs(get_layer_grad(core, layer_i))
-    grads = [i.detach().cpu().numpy()/nsamples for i in grads]
-    return grads
-
-def integrated_gradients(model, core, loader, n=25, neuron=None):
-    model.zero_grad()
-    X = next(loader)
-    stim0 = deepcopy(X['stim'])
-    for i in range(n):
-        # x = deepcopy(X)
-        X["stim"] = stim0 * (i / n)
-        y = model(X)
-    if neuron == None:
-        torch.mean(y).backward()
-    else:
-        y[0, neuron].backward()  
-    grads = [get_layer_grad(core, i) for i in range(len(core))] 
-    return [i.detach().cpu().numpy()/n for i in grads]
-
-def get_layer_dist(layer):
-    units = np.abs(layer).mean((0, 1, 2))
-    quantiles = np.percentile(units, [0, 25, 50, 75, 100])
-    print(quantiles)
-    quantiles[:2] = quantiles[2]-quantiles[:2]
-    quantiles[3:] = quantiles[3:]-quantiles[2]
-    return quantiles, units.mean()
-
-def plot_grads(grads):
-    rowNum = 2 if all([len(i) == len(grads[0]) for i in grads]) else 1
-    plt.figure(figsize=(10, 5*rowNum))
-    plt.suptitle("Gradient Distribution (magnitude)")
-    grads = [np.abs(i).mean((0, 1, 2)) for i in grads]
-    plt.subplot(rowNum, 2, 1)
-    plt.title('Not normalized')
-    plt.xlabel('Layer')
-    plt.ylabel('mag')
-    plt.boxplot(grads)
-    for i, gradi in enumerate(grads):
-        x = np.random.normal(i, 0.05, len(gradi))
-        plt.scatter(x, gradi, marker='x')
-
-    grads_sorted = [np.sort(i, axis=0) for i in grads]
-    grads = [i / i.max() for i in grads]
-    plt.subplot(rowNum, 2, 2)
-    plt.title('per-layer normalization')
-    plt.xlabel('Layer')
-    plt.ylabel('Relative mag')
-    plt.boxplot(grads)
-    for i, gradi in enumerate(grads):
-        x = np.random.normal(i+1, 0.05, len(gradi))
-        plt.scatter(x, gradi, marker='x')
-
-    if rowNum == 2:
-        plt.subplot(4, 1, 3)
-        plt.title('per-layer normalization')
-        plt.ylabel('Layer')
-        plt.gca().set_xticks([])
-        grads_im = [np.sort(i, axis=0) for i in grads]
-        plt.imshow(grads_im, cmap='hot', interpolation='None', origin='lower')
-        plt.colorbar()
-
-        plt.subplot(4, 1, 4)
-        plt.title('global normalization')
-        plt.ylabel('Layer')
-        plt.gca().set_xticks([])
-        mx = max([i.max() for i in grads_sorted])
-        plt.imshow([i/mx for i in grads_sorted], cmap='hot', interpolation='None', origin='lower')
-        plt.colorbar()
-
-    plt.tight_layout()
-
-def get_integrated_grad_summary(model, core, loader, nsamples=1000):
-    grads = integrated_gradients(model, core, loader)
-    for i in range(1, nsamples):
-        new_grads = integrated_gradients(model, core, loader)
-        grads = [grads[i] + new_grads[i] for i in range(len(grads))]
-    grads = [i/nsamples for i in grads]
-    plot_grads(grads)
-    return grads
-
-def get_grad_summary(model, core, loader, device, cids, loss=True, sample_points=[1, 100, 1000, 10000], stability=False):
-    plt.figure()
-    plt.suptitle('Gradient Sparsity (entire units)')
-    n = len(sample_points)
-    sx = math.floor(np.sqrt(n))
-    sy = math.ceil(n / sx)
-    stability = []
-    plota = []
-    for point in sample_points:
-        loader.reset()
-        grads = grad_sum(model, core, loader, device, cids, nsamples=point, loss=loss)
-        s = [np.abs(layer).mean((0, 1, 2)) for layer in grads]
-        stability.append([(layer!=0).astype(int) for layer in s])
-        nz = [np.count_nonzero(layer)/len(layer) for layer in s]
-        plota.append(nz)
-        plt.subplot(sx, sy, sample_points.index(point) + 1)
-        plt.stem(nz)
-        plt.title(f'{point} samples')
-        plt.xlabel('layer')
-        plt.ylabel('frac nz grads')
-        plt.ylim(0, 1)
-    plt.tight_layout()
-
-    # #TODO Check this
-    # if stability:
-    #     stab_per_layer = [[] for i in range(len(stability[0]))]
-    #     for i in range(1, len(stability)):
-    #         diff = [stability[i][layer] - stability[i-1][layer] for layer in range(len(stability[i]))]
-    #         for layer in range(len(diff)):
-    #             stab_per_layer[layer].append(np.abs(diff[layer]).mean())
-    #     plt.figure()
-    #     plt.suptitle('Gradient Stability (entire units)')
-    #     for i, layer in enumerate(stab_per_layer):
-    #         plt.subplot(sx, sy, i + 1)
-    #         plt.stem(layer)
-    #         plt.title(f'layer {i}')
-    #         plt.xlabel('sample points (log scale)')
-    #         plt.ylabel('frac changed grads')
-    #         plt.ylim(0, 1)
-    #     plt.tight_layout()
-
-def plot_layer(layer, ind=None):
-    
-    if layer.filter_dims[-1] > 1:
-        ws = layer.get_weights()
-        if ind is not None: 
-            ws = ws[..., ind]
-        ws = np.transpose(ws, (2,0,1,3))
-        layer.plot_filters()
-    else:
-        ws = layer.get_weights()
-        if ind is not None: 
-            ws = ws[..., ind]
-
-        nout = ws.shape[-1]
-        nin = ws.shape[0]
-        plt.figure(figsize=(10, 10))
-
-        for i in range(nin):
-            for j in range(nout):
-                plt.subplot(nin, nout, i*nout + j + 1)
-                plt.imshow(ws[i, :,:, j], aspect='auto', interpolation='none')
-                plt.axis("off")
-
-def plot_dense_readout(layer):
-    ws = layer.get_weights()
-    n = ws.shape[-1]
-    sx = int(np.ceil(np.sqrt(n)))
-    sy = int(np.ceil(np.sqrt(n)))
-    plt.figure(figsize=(sx*2, sy*2))
-    for cc in range(n):
-        plt.subplot(sx, sy, cc + 1)
-        v = np.max(np.abs(ws[:,:,cc]))
-        plt.imshow(ws[:,:,cc], interpolation='none', cmap=plt.cm.coolwarm, vmin=-v, vmax=v)
-
-def plot_model(model):
-
-    for layer in model.core:
-        plot_layer(layer)
-        plt.show()
-
-    if hasattr(model, 'offsets'):
-        for i,layer in enumerate(model.offsets):
-            _ = plt.plot(layer.get_weights())
-            plt.title("Offset {}".format(model.offsetstims[i]))
-            plt.show()
-    
-    if hasattr(model, 'gains'):
-        for i,layer in enumerate(model.gains):
-            _ = plt.plot(layer.get_weights())
-            plt.title("Gain {}".format(model.gainstims[i]))
-            plt.show()
-
-    if hasattr(model.readout, 'mu'):
-        plt.imshow(model.readout.get_weights())
-    elif hasattr(model.readout, 'space'):
-        plot_dense_readout(model.readout.space)
-        plt.show()
-        plt.imshow(model.readout.feature.get_weights())
-        plt.xlabel("Neuron ID")
-        plt.ylabel("Feature ID")
-    
-def eval_model(model, valid_dl):
-    loss = model.loss.unit_loss
-    model.eval()
-
-    LLsum, Tsum, Rsum = 0, 0, 0
-        
-    device = next(model.parameters()).device  # device the model is on
-    with torch.no_grad():
-        if isinstance(valid_dl, dict):
-            for dsub in valid_dl.keys():
-                    if valid_dl[dsub].device != device:
-                        valid_dl[dsub] = valid_dl[dsub].to(device)
-            rpred = model(valid_dl)
-            LLsum = loss(rpred,
-                        valid_dl['robs'][:,model.cids],
-                        data_filters=valid_dl['dfs'][:,model.cids],
-                        temporal_normalize=False)
-            Tsum = valid_dl['dfs'][:,model.cids].sum(dim=0)
-            Rsum = (valid_dl['dfs'][:,model.cids]*valid_dl['robs'][:,model.cids]).sum(dim=0)
-
-        else:
-            for data in tqdm(valid_dl, desc='Eval models'):
-                        
-                for dsub in data.keys():
-                    if data[dsub].device != device:
-                        data[dsub] = data[dsub].to(device)
-                
-                rpred = model(data)
-                LLsum += loss(rpred,
-                        data['robs'][:,model.cids],
-                        data_filters=data['dfs'][:,model.cids],
-                        temporal_normalize=False)
-                Tsum += data['dfs'][:,model.cids].sum(dim=0)
-                Rsum += (data['dfs'][:,model.cids] * data['robs'][:,model.cids]).sum(dim=0)
-                
-    LLneuron = LLsum/Rsum.clamp(1)
-
-    rbar = Rsum/Tsum.clamp(1)
-    LLnulls = torch.log(rbar)-1
-    LLneuron = -LLneuron - LLnulls
-
-    LLneuron/=np.log(2)
-
-    return LLneuron.detach().cpu().numpy()
-
-# llsp = ((robs * log(pred) - pred) * dfs).sum(0)
-
-# llbase = (((robs * log(mean_firing_guess)) - mean_firing_rate.expand_as(robs)) * dfs).sum(0)
-# llsp - llbase)/sum(dfs*robs)/log(2) 
 class Evaluator(nn.Module):
     """Module that evaluates the log-likelihood of a model on a given dataset.
-    This is used for training.
+    This can be used for training.
+    
+    Instructions:
+    - initialize with a list of neuron indices to evaluate.
+    - call startDS to initialize null estimates (firing rate means).
+    - 
+    
     """
     def __init__(self, cids):
         super().__init__()
         self.cids = cids
         self.LLnull, self.LLsum, self.nspikes = 0, 0, 0
     def startDS(self, train_ds=None, means=None):
+        """Initialize null estimates (firing rate means).
+
+        Either provide a training dataset or a tensor of means.
+        """
         if means is not None:
             self.register_buffer("mean_spikes", means)
         elif train_ds is not None:
@@ -684,9 +53,16 @@ class Evaluator(nn.Module):
         else:
             raise ValueError("Either train_ds or means must be provided.")
     def getLL(self, pred, batch):
+        """Compute poisson log-likelihood of a batch of predictions.
+        """
         poisson_ll = batch["robs"][:, self.cids] * torch.log(pred + 1e-8) - pred
         return (poisson_ll * batch["dfs"][:, self.cids]).sum(dim=0)
     def __call__(self, rpred, batch):
+        """Evaluate model on a batch of data.
+        Args:
+            rpred (Tensor): predicted firing rates shaped (batch_size, num_neurons=len(cids)).
+            batch (dict): dictionary of tensors with keys "dfs" and "robs".
+        """
         llsum = self.getLL(rpred, batch).cpu()
         llnull = self.getLL(self.mean_spikes.to(rpred.device).expand(*rpred.shape), batch).cpu()
         self.LLnull = self.LLnull + llnull
@@ -694,12 +70,18 @@ class Evaluator(nn.Module):
         self.nspikes = self.nspikes + (batch["dfs"][:, self.cids] * batch["robs"][:, self.cids]).sum(dim=0).cpu()
         del llsum, llnull, rpred, batch
     def closure(self):
-        return (self.LLsum - self.LLnull)/self.nspikes.clamp(1)/np.log(2)
+        """Compute bits/spike for the neurons evaluated so far and reset counters.
+        """
+        bps = (self.LLsum - self.LLnull)/self.nspikes.clamp(1)/np.log(2)
+        self.LLnull, self.LLsum, self.nspikes = 0, 0, 0
+        return bps
     
-def eval_model_fast_new(model, val_dl, train_ds=None, means=None):
+def eval_model(model, val_dl, train_ds=None, means=None):
     '''
         Evaluate model on validation data.
         valid_data: either a dataloader or a dictionary of tensors.
+        
+        Provide either a training dataset or a tensor of training firing rate means.
     '''
     model.eval()
     with torch.no_grad():
@@ -709,50 +91,13 @@ def eval_model_fast_new(model, val_dl, train_ds=None, means=None):
             evaluator(model(b), b)
         return evaluator.closure().detach().cpu().numpy()
 
-def eval_model_fast(model, valid_data, t_mean = 0, t_std = 1):
-    '''
-        Evaluate model on validation data.
-        valid_data: either a dataloader or a dictionary of tensors.
-    '''
-    loss = model.loss.unit_loss
-    model.eval()
-    LLsum, Tsum, Rsum = 0, 0, 0
-    if isinstance(valid_data, dict):
-        with torch.no_grad():
-            rpred = model(valid_data) * t_std + t_mean
-            LLsum = loss(rpred,
-                        valid_data['robs'][:,model.cids],
-                        data_filters=valid_data['dfs'][:,model.cids],
-                        temporal_normalize=False)
-            Tsum = valid_data['dfs'][:,model.cids].sum(dim=0)
-            Rsum = (valid_data['dfs'][:,model.cids]*valid_data['robs'][:,model.cids]).sum(dim=0)
-    else:
-        for data in tqdm(valid_data, desc='Eval models'):  
-            data = to_device(data, next(model.parameters()).device)          
-            with torch.no_grad():
-                rpred = model(data) * t_std + t_mean
-                LLsum += loss(rpred,
-                        data['robs'][:,model.cids],
-                        data_filters=data['dfs'][:,model.cids],
-                        temporal_normalize=False)
-                Tsum += data['dfs'][:,model.cids].sum(dim=0)
-                Rsum += (data['dfs'][:,model.cids] * data['robs'][:,model.cids]).sum(dim=0)
-            del data
-                
-    LLneuron = LLsum/Rsum.clamp(1)
-
-    rbar = Rsum/Tsum.clamp(1)
-    if not (rbar > 0).all():
-        print('Eval model: some neurons have no spikes.')
-    LLnulls = torch.log(rbar)-1
-    LLneuron = -LLneuron - LLnulls
-
-    LLneuron/=np.log(2)
-
-    return LLneuron.detach().cpu().numpy()
-
 def eval_model_summary(model, valid_dl, train_ds=None, means=None, topk=None, **kwargs):
-    ev = eval_model_fast_new(model, valid_dl, train_ds=train_ds, means=means)
+    """Evaluate model on validation data and plot histogram of bits/spike.
+
+    Provide either a training dataset or a tensor of training firing rate means.
+    Optional topk argument to only plot the best topk neurons.
+    """
+    ev = eval_model(model, valid_dl, train_ds=train_ds, means=means)
     print(ev)
     if np.inf in ev or np.nan in ev:
         i = np.count_nonzero(np.isposinf(ev))

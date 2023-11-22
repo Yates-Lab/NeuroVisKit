@@ -10,7 +10,6 @@ import dill
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from zmq import device
-from NeuroVisKit.utils.datasets.generic import GenericDataset
 from tqdm import tqdm
 from functools import reduce
 from IPython.display import Video
