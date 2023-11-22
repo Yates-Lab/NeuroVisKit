@@ -6,10 +6,10 @@ from scipy.sparse.csgraph import minimum_spanning_tree
 from scipy.signal import correlate
 # import skbio
 import torch
-# from skbio.stats.ordination import pcoa as skbio_pcoa
+from skbio.stats.ordination import pcoa as skbio_pcoa
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
-from . import toy_datasets as tds
+import NeuroVisKit.utils.toy_datasets as tds
 
 def corr_dist(x, y):
     '''
@@ -88,25 +88,25 @@ def umap(mat, n_components=2, n_neighbors=3):
     fit = umap_l.UMAP(n_components=n_components, n_neighbors=n_neighbors)
     return fit.fit_transform(mat)
 
-# def pcoa(dist_mat, eigenv_cutoff=None, n_components=3):
-#     '''
-#         Perform PCoA on dist_mat.
-#         Return the projected matrix on the first n_components.
-#         Add the min eigenvalue to the diagonal of dist_mat if the min eigenvalue is less than eigenv_cutoff.
-#     '''
-#     n_components = -1 if n_components is None else n_components
-#     if eigenv_cutoff is None:
-#         out = skbio_pcoa(dist_mat)
-#     else:
-#         with warnings.catch_warnings():
-#             warnings.simplefilter("ignore")
-#             out = skbio_pcoa(dist_mat)
-#             min_eigenval = min(out.eigvals.values)
-#             if min_eigenval < eigenv_cutoff:
-#                 dist_mat = dist_mat + abs(min_eigenval)
-#                 dist_mat.diag().fill(0)
-#                 out = skbio_pcoa(dist_mat)
-#     return out.samples.values[:, :n_components]
+def pcoa(dist_mat, eigenv_cutoff=None, n_components=3):
+    '''
+        Perform PCoA on dist_mat.
+        Return the projected matrix on the first n_components.
+        Add the min eigenvalue to the diagonal of dist_mat if the min eigenvalue is less than eigenv_cutoff.
+    '''
+    n_components = -1 if n_components is None else n_components
+    if eigenv_cutoff is None:
+        out = skbio_pcoa(dist_mat)
+    else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out = skbio_pcoa(dist_mat)
+            min_eigenval = min(out.eigvals.values)
+            if min_eigenval < eigenv_cutoff:
+                dist_mat = dist_mat + abs(min_eigenval)
+                dist_mat.diag().fill(0)
+                out = skbio_pcoa(dist_mat)
+    return out.samples.values[:, :n_components]
     
 def find_most_equidistant(arr, dist_fn):
     '''

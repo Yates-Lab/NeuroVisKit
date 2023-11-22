@@ -13,12 +13,14 @@ if __name__ == "__main__":
             'NeuroVisKit.tests',
             'NeuroVisKit.utils',
             'NeuroVisKit._utils',
+            'NeuroVisKit._future'
         ],
         package_dir={
             'NeuroVisKit': '.',
             'NeuroVisKit.tests': 'tests',
             'NeuroVisKit.utils': 'utils',
             'NeuroVisKit._utils': '_utils',
+            'NeuroVisKit._future': '_future'
         },
         # package_data={
         #     'NeuroVisKit': ['*'],

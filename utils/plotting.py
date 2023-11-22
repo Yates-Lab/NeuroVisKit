@@ -1,6 +1,43 @@
+#this file should not have internal dependencies.
 import numpy as np
 import imageio, os
 import matplotlib.pyplot as plt
+from IPython.display import Video
+
+def show_stim_movie(stim, path="stim_video.mp4", fps=30, normalizing_constant=None):
+    """
+        Given stim show an interactive movie.
+        
+        stim: (time, 1, x, y)
+    """
+    stim = stim[:, 0].detach().cpu().numpy()
+    if normalizing_constant is None:
+        stim = stim/np.abs(stim).max()*127 + 127
+    else:
+        stim = stim * normalizing_constant + 127
+    stim = stim.astype(np.uint8)
+    writer = imageio.get_writer(path, fps=fps)
+    for i in stim:
+        writer.append_data(i)
+    writer.close()
+    w, h = stim.shape[1:]
+    return Video(path, embed=True, width=w*3, height=h*3)
+
+def plot_stim(stim, fig=None, title=None, subplot_shape=(1, 1)):
+    if fig is None:
+        plt.figure()
+    if title is not None:
+        plt.title(title)
+    c = int(np.ceil(np.sqrt(stim.shape[-1])))
+    r = int(np.ceil(stim.shape[-1] / c))
+    for i in range(stim.shape[-1]):
+        ind = (i%c) + (i//c)*c*subplot_shape[1]
+        plt.subplot(r*subplot_shape[0],c*subplot_shape[1],ind+1)
+        plt.imshow(stim[..., i], vmin=stim.min(), vmax=stim.max())
+        plt.gca().set_xticks([])
+        plt.gca().set_yticks([])
+    plt.tight_layout()
+    return fig
 
 def plot_stas(stas, show_zero=True, plot=True, thresh=None, title=None):
     
