@@ -3,8 +3,29 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+from weakref import proxy
+from NeuroVisKit._utils.io import dump
 from NeuroVisKit.utils.process import get_process_dict
 from NeuroVisKit._utils.utils import compose
+from lightning.pytorch.callbacks import ModelCheckpoint
+
+class ThoroughModelCheckpoint(ModelCheckpoint):
+    """A ModelCheckpoint that saves the entire model without dependencies.
+    **WARNING: may result in very large files.**
+    """
+    def _save_checkpoint(self, trainer, filepath) -> None:
+        #make any dirs if needed
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        dump(trainer.lightning_module, filepath)
+        # trainer.save_checkpoint(filepath, self.save_weights_only)
+
+        self._last_global_step_saved = trainer.global_step
+
+        # notify loggers
+        if trainer.is_global_zero:
+            for logger in trainer.loggers:
+                logger.after_save_checkpoint(proxy(self))
 
 def clean_model_from_wandb(model):
     if hasattr(model, "_wandb_hook_names"):
