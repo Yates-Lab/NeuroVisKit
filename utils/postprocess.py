@@ -1,18 +1,10 @@
 #%%
-import dill
-import os
 import torch
 import numpy as np
-import math
-from copy import deepcopy
-from itertools import cycle
-import matplotlib
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from . import utils
-from .utils import to_device
 import torch.nn as nn
-from NeuroVisKit.utils.mei import irfC, irf
+from NeuroVisKit.utils.mei import irfC
 
 #this makes sure if we move stuff around, users dont need to change imports.
 from NeuroVisKit._utils.postprocess import *

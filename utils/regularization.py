@@ -1,13 +1,9 @@
 #%%## regularization.py: managing regularization
-from logging import warning
 import torch
 from torch import nn
 from NeuroVisKit._utils.utils import is_nn_module
 from torch.nn import functional as F
 import numpy as np
-from functools import reduce
-import inspect
-import math
 import warnings
 
 #this makes sure if we move stuff around, users dont need to change imports.

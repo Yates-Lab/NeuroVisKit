@@ -1,23 +1,10 @@
-import os, sys, getopt
-import gc
-import time
-import random
-from copy import deepcopy
 import numpy as np
-import scipy
 import torch
-import dill
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from zmq import device
 from tqdm import tqdm
-from functools import reduce
-from IPython.display import Video
 import scipy.signal as signal
-import imageio
-from NeuroVisKit._utils.utils import memory_clear
 import torch.nn as nn
-import torch.nn.functional as F
 
 #this makes sure if we move stuff around, users dont need to change imports.
 from NeuroVisKit._utils.utils import * 

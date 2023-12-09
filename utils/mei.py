@@ -1,8 +1,4 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from tqdm import tqdm
-import numpy as np
 
 def irfC(x, model, neuron_inds=None, batched=False):
     '''Computes the IRFs for given neuron inds, time contiguous model and input

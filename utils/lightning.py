@@ -1,24 +1,12 @@
-import os, dill, sys, shutil, json, io, contextlib
-from typing import Any, Callable, Optional, Union
-from lightning.pytorch.core.optimizer import LightningOptimizer
+import dill, json
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.optim.optimizer import Optimizer
-from torch.utils.data import DataLoader, SubsetRandomSampler, BatchSampler, Dataset
 import lightning as pl
-from lightning.pytorch.callbacks import LearningRateFinder
-import tqdm
-from NeuroVisKit._utils.lightning import PreprocessFunction
-from NeuroVisKit._utils.utils import get_module_dict, import_module_by_path, sum_dict_list
-import math
-import numpy as np
+from NeuroVisKit._utils.utils import get_module_dict, import_module_by_path
 import NeuroVisKit.utils.models as models
 from NeuroVisKit.utils.evaluate import EvalModule
-from NeuroVisKit.utils.utils import to_device
 import warnings
 import logging
-import importlib.util
 # from NeuroVisKit.utils.optimizer import get_optim_dict
 # from NeuroVisKit.utils.preprocess import get_process_dict
 
@@ -27,7 +15,7 @@ torch.set_float32_matmul_precision("medium")
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
     
 class PLWrapper(pl.LightningModule):
-    def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=PreprocessFunction(), normalize_loss=False, optimizer_kwargs={}):
+    def __init__(self, wrapped_model=None, lr=1e-3, optimizer=torch.optim.Adam, preprocess_data=nn.Identity(), normalize_loss=False, optimizer_kwargs={}):
         super().__init__()
         self.wrapped_model = wrapped_model
         self.model = wrapped_model.model

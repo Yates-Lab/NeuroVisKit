@@ -1,18 +1,9 @@
-from typing import Optional
-from torch.nn.modules.module import Module
-from NeuroVisKit._utils.utils import seed_everything
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
 # from models import ModelWrapper
 # from models import CNNdense as CNNdenseNDNT
 from NeuroVisKit.utils import regularization
-from NeuroVisKit.utils import utils
 from NeuroVisKit.utils.loss import Poisson
 # from unet import UNet, BioV
-import math
-from tqdm import tqdm
 # from models.cnns import DenseReadout as DenseReadoutNDNT
 
 class ModelWrapper(nn.Module):

@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from tqdm import tqdm
-import math
 
 class EvalModule(nn.Module):
     """Module that evaluates the log-likelihood of a model on a given dataset.
