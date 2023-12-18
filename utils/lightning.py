@@ -7,6 +7,10 @@ import NeuroVisKit.utils.models as models
 from NeuroVisKit.utils.evaluate import EvalModule
 import warnings
 import logging
+
+#this makes sure if we move stuff around, users dont need to change imports.
+from NeuroVisKit._utils.lightning import *
+
 # from NeuroVisKit.utils.optimizer import get_optim_dict
 # from NeuroVisKit.utils.preprocess import get_process_dict
 
