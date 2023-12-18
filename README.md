@@ -1,5 +1,10 @@
 # NeuroVisKit
 
+For installing a non-editable version run 
+pip install git+https://github.com/Yates-Lab/NeuroVisKit.git
+
+(append @<branch-name>) as needed.
+
 For installing an editable version run 
 cd NeuroVisKit
 pip install -e . -vvv

@@ -1,6 +1,144 @@
+#this file should not have dependencies within this folder.
 import numpy as np
 import imageio, os
 import matplotlib.pyplot as plt
+from IPython.display import Video
+from tqdm import tqdm
+
+from NeuroVisKit._utils.postprocess import get_conv_submodules
+
+def plot_model_conv(model):
+    """Plots the convolutional kernels of a model.
+    
+    Recommended only for small models.
+    """
+    f = []
+    submods = get_conv_submodules(model)
+    for ind, module in enumerate(submods): #model.modules()
+        # check if convolutional layer
+        # if issubclass(type(module), nn.modules.conv._ConvNd):
+        w = module.weight.detach().data.cpu().numpy()
+        if len(w.shape) == 5: # 3d conv (cout, cin, x, y, t)
+            w = w.squeeze(1) # asume cin is 1
+            w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize all |xyt (1, 2, 3)
+        elif len(w.shape) == 4: # 2d conv (cout, cin, x, y)
+            w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize all |cin xy (1, 2, 3)
+        # shape is (cout, cin, x, y)
+        titles = ['cout %d'%i for i in range(w.shape[0])]
+        ft = plot_grid(w, titles=titles, suptitle='Layer %d'%ind, desc='Layer %d'%ind, vmin=-1, vmax=1)
+        f.append(ft)
+    return f
+
+
+def plot_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs):
+    '''
+        Plot a grid of figures such that each subfigure has m subplots.
+        mat is a list of lists of image data (n, m, x, y)
+        titles is a list of titles of length n.
+    '''
+    n = len(mat)
+    m = len(mat[0])
+    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(m, n))
+    
+    for i in tqdm(range(n), desc=desc):
+        for j in range(m):
+            img = mat[i][j]
+            #the following is a patch to fix an indexing error in matplotlib
+            if n == 1:
+                axs = axes[j]
+            elif m == 1:
+                axs = axes[i]
+            else:
+                axs = axes[i, j]
+                
+            axs.imshow(img, vmin=vmin, vmax=vmax, interpolation='none')
+            axs.axis('off')
+            if titles is not None:
+                axs.set_title(titles[i])
+    
+    for key in kwargs:
+        eval(f'plt.{key}')(kwargs[key])
+        
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    return fig
+
+#TODO probably move this to project specific repo.
+def plot_split_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs):
+    '''
+        Plot a grid of figures such that each subfigure has m subplots.
+        mat is a list of lists of image data (n, m, x, y)
+        titles is a list of titles of length n.
+        colors are split such that first half of m is red and second half is blue.
+    '''
+    n = len(mat)
+    m = len(mat[0])
+    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(m, n))
+    
+    for i in tqdm(range(n), desc=desc):
+        for j in range(m):
+            img = mat[i][j]
+            #the following is a patch to fix an indexing error in matplotlib
+            if n == 1:
+                axs = axes[j]
+            elif m == 1:
+                axs = axes[i]
+            else:
+                axs = axes[i, j]
+            axs.imshow(img, vmin=vmin, vmax=vmax, interpolation='none')
+            # axs.axis('off')
+            axs.set_xticks([])
+            axs.set_yticks([])
+            if j >= m//2:
+                for spine in axs.spines.values():
+                    spine.set_edgecolor('blue')
+                    spine.set_linewidth(2)
+            else:
+                for spine in axs.spines.values():
+                    spine.set_edgecolor('red')
+                    spine.set_linewidth(2)
+            if titles is not None:
+                axs.set_title(titles[i])
+    
+    for key in kwargs:
+        eval(f'plt.{key}')(kwargs[key])
+        
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    return fig
+
+def show_stim_movie(stim, path="stim_video.mp4", fps=30, normalizing_constant=None):
+    """
+        Given stim show an interactive movie.
+        
+        stim: (time, 1, x, y)
+    """
+    stim = stim[:, 0].detach().cpu().numpy()
+    if normalizing_constant is None:
+        stim = stim/np.abs(stim).max()*127 + 127
+    else:
+        stim = stim * normalizing_constant + 127
+    stim = stim.astype(np.uint8)
+    writer = imageio.get_writer(path, fps=fps)
+    for i in stim:
+        writer.append_data(i)
+    writer.close()
+    w, h = stim.shape[1:]
+    return Video(path, embed=True, width=w*3, height=h*3)
+
+def plot_stim(stim, fig=None, title=None, subplot_shape=(1, 1)):
+    if fig is None:
+        plt.figure()
+    if title is not None:
+        plt.title(title)
+    c = int(np.ceil(np.sqrt(stim.shape[-1])))
+    r = int(np.ceil(stim.shape[-1] / c))
+    for i in range(stim.shape[-1]):
+        ind = (i%c) + (i//c)*c*subplot_shape[1]
+        plt.subplot(r*subplot_shape[0],c*subplot_shape[1],ind+1)
+        plt.imshow(stim[..., i], vmin=stim.min(), vmax=stim.max())
+        plt.gca().set_xticks([])
+        plt.gca().set_yticks([])
+    plt.tight_layout()
+    return fig
 
 def plot_stas(stas, show_zero=True, plot=True, thresh=None, title=None):
     

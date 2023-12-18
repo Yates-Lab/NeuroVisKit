@@ -7,8 +7,6 @@ import os
 from copy import deepcopy
 import re
 
-from NeuroVisKit._utils.lightning import clean_model_from_wandb
-
 def find_file(regex_str, rootdir='.'):
         regex = re.compile(regex_str)
         matches = []
@@ -53,6 +51,33 @@ def hash_file(filename, hash_algorithm="sha256", buffer_size=65536):
         return hasher.hexdigest(5)
     
     return hasher.hexdigest()
+
+def clean_model_from_wandb(model):
+    if hasattr(model, "_wandb_hook_names"):
+        del model._wandb_hook_names
+    if hasattr(model, "_forward_hooks"):
+        for k, v in model._forward_hooks.items():
+            s = str(v).lower()
+            if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
+                del model._forward_hooks[k]
+    if hasattr(model, "model") and hasattr(model.model, "_forward_hooks"):
+        for k, v in model.model._forward_hooks.items():
+            s = str(v).lower()
+            if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
+                del model.model._forward_hooks[k]
+    if hasattr(model, "wrapped_model") and hasattr(model.wrapped_model, "_forward_hooks"):
+        for k, v in model.wrapped_model._forward_hooks.items():
+            s = str(v).lower()
+            if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
+                del model.wrapped_model._forward_hooks[k]
+    if hasattr(model, "modules"):
+        for module in model.modules():
+            if hasattr(module, "_forward_hooks"):
+                for k, v in module._forward_hooks.items():
+                    s = str(v).lower()
+                    if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
+                        del module._forward_hooks[k]
+    return model
 
 def dump(obj, file):
     obj = deepcopy(obj)

@@ -10,7 +10,82 @@ import torch.nn.functional as F
 import subprocess as sp
 import os
 import platform
+import time
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
+def reclass(obj, new_class_object=None):
+    """
+        Reclass an object to a new class
+    """
+    if new_class_object is None:
+        try:
+            new_class_object = globals()[obj.__class__.__name__]()
+        except:
+            print("if you are not providing an instance of the new class, you must ensure your new class is available in the global namespace.")
+            print("Possibly cannot find class %s. make sure its imported directly." %obj.__class__.__name__)
+            print("ensure that class __init__ works when not entering any arguments")
+    for k, v in vars(obj).items():
+        setattr(new_class_object, k, v)        
+    return new_class_object
+
+def pad_causal(x, layer, kdims=None):
+    """
+    Pad a tensor for a causal convolution.
+    x is a tensor
+    layer is a convolutional layer
+    kdims is the dimensions of the kernel that should be causal
+    """
+    kdims = kdims if kdims is not None else np.arange(len(layer.kernel_size))
+    kdims = [kdims] if type(kdims) is int else kdims
+    pad_array = []
+    for i in np.arange(len(layer.kernel_size))[::-1]:
+        pad_array += [layer.kernel_size[i]-1, 0] if i in kdims else [0, 0]
+    return F.pad(x, pad_array)
+
+def KaimingTensor(shape, out_dim=-1, *args, **kwargs):
+    """Generate a tensor with Kaiming uniform distribution.
+
+    Args:
+        shape: shape of the tensor to be generated. 
+        out_dim (int, optional): defaults to -1, used for determining the fan_out of the tensor.
+    """
+    t = torch.empty(shape, *args, **kwargs)
+    nn.init.kaiming_uniform_(t, a=1/shape[out_dim])
+    return t
+
+def extract_device(obj):
+    """Get the device of a pytorch object.
+    """
+    if isinstance(obj, nn.Module): # model
+        return next(obj.parameters()).device
+    elif isinstance(obj, DataLoader) or hasattr(obj, 'num_workers'): # dataloader
+        batch = next(iter(obj))
+        if isinstance(batch, dict):
+            return batch.values().__iter__().__next__().device
+        return batch[0].device
+    elif isinstance(obj, dict):
+        return obj.values().__iter__().__next__().device
+    return obj.device # tensor
+
+def getattr_recursive(obj, attr):
+    """Get an attribute of an object recursively (e.g. obj.attr1.attr2.attr3)
+    obj: the object to get the attribute from
+    attr: the attribute to get (e.g. attr1.attr2.attr3)
+    """
+    return reduce(getattr, attr.split('.'), obj)
+
+
+def uneven_tqdm(iterable, total, get_len=lambda x: len(x["robs"]), **kwargs):
+    """
+        tqdm that works with uneven lengths of iterable and total
+    """
+    pbar = tqdm(total=total, **kwargs)
+    for i in iterable:
+        yield i
+        pbar.update(get_len(i))
+    pbar.close()
+    
 # def assess_tensors_in_memory():
 #     def recursive_tensor_memory(dict_to_recurse):
 #         if isinstance(dict_to_recurse, dict):
@@ -200,3 +275,29 @@ def import_module_by_path(module_path, module_name="custom_models"):
     custom_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(custom_module)
     return custom_module
+
+class TimeLogger():
+    def __init__(self):
+        self.timer = time.time()
+        self.accumulated = 0
+    def reset(self):
+        self.accumulated += time.time() - self.timer
+        self.timer = time.time()
+    def log(self, msg):
+        print(f'{msg} {(time.time() - self.timer):.1f}s')
+        self.accumulated += time.time() - self.timer
+        self.timer = time.time()
+    def closure(self):
+        self.reset()
+        m, s = int(self.accumulated//60), self.accumulated%60
+        print(f'Total run took {m}m {s}s')
+        self.accumulated = 0
+        
+def to_device(x, device='cpu'):
+    if torch.is_tensor(x):
+        return x.to(device) if x.device != device else x
+    elif isinstance(x, dict):
+        return {k: to_device(v, device=device) for k,v in x.items()}
+    elif isinstance(x, list):
+        return [to_device(v, device=device) for v in x]
+    return x

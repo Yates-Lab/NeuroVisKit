@@ -1,37 +1,27 @@
+#%%
 import os, sys, shutil, dill
-import numpy as np
 import torch
-import torch.nn.functional as F
-import torch.nn as nn
-from NeuroVisKit.utils.process import get_process_dict
-from NeuroVisKit._utils.utils import compose
+from weakref import proxy
+from NeuroVisKit._utils.io import dump
+from lightning.pytorch.callbacks import ModelCheckpoint
 
-def clean_model_from_wandb(model):
-    if hasattr(model, "_wandb_hook_names"):
-        del model._wandb_hook_names
-    if hasattr(model, "_forward_hooks"):
-        for k, v in model._forward_hooks.items():
-            s = str(v).lower()
-            if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
-                del model._forward_hooks[k]
-    if hasattr(model, "model") and hasattr(model.model, "_forward_hooks"):
-        for k, v in model.model._forward_hooks.items():
-            s = str(v).lower()
-            if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
-                del model.model._forward_hooks[k]
-    if hasattr(model, "wrapped_model") and hasattr(model.wrapped_model, "_forward_hooks"):
-        for k, v in model.wrapped_model._forward_hooks.items():
-            s = str(v).lower()
-            if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
-                del model.wrapped_model._forward_hooks[k]
-    if hasattr(model, "modules"):
-        for module in model.modules():
-            if hasattr(module, "_forward_hooks"):
-                for k, v in module._forward_hooks.items():
-                    s = str(v).lower()
-                    if "torchhistory" in s or "wandb" in s or "torchgraph" in s:
-                        del module._forward_hooks[k]
-    return model
+class ThoroughModelCheckpoint(ModelCheckpoint):
+    """A ModelCheckpoint that saves the entire model without dependencies.
+    **WARNING: may result in very large files.**
+    """
+    def _save_checkpoint(self, trainer, filepath) -> None:
+        #make any dirs if needed
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        dump(trainer.lightning_module, filepath)
+        # trainer.save_checkpoint(filepath, self.save_weights_only)
+
+        self._last_global_step_saved = trainer.global_step
+
+        # notify loggers
+        if trainer.is_global_zero:
+            for logger in trainer.loggers:
+                logger.after_save_checkpoint(proxy(self))
 
 def pl_device_format(device):
     """Convert a torch device to the format expected by pytorch lightning.
@@ -47,25 +37,6 @@ def pl_device_format(device):
         device = str(device)
     if type(device) == str:
         return ",".join(device.split("cuda:"))[1:] + ','
-
-class PreprocessFunction(nn.Module):
-    """Module that applies a list of specified preprocess functions.
-
-    Args:
-        preprocess_arr: list of strings specifying the preprocess functions to apply
-    """
-    def __init__(self, preprocess_arr=[]):
-        super().__init__()
-        PREPROCESS_DICT = get_process_dict()
-        operators = []
-        for k, v in PREPROCESS_DICT.items():
-            if k in preprocess_arr:
-                operators.append(v)
-                if isinstance(v, nn.Module):
-                    self.add_module(k, v)
-        self.operator = compose(*operators)
-    def forward(self, x):
-        return self.operator(x)
 
 def get_dirnames(config):
     """Returns a dictionary of directory names for the given config.
