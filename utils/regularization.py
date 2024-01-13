@@ -2,12 +2,15 @@
 import torch
 from torch import nn
 from NeuroVisKit._utils.utils import is_nn_module
+from NeuroVisKit._utils.regularization import _verify_dims
 from torch.nn import functional as F
 import numpy as np
 import warnings
 
 #this makes sure if we move stuff around, users dont need to change imports.
 from NeuroVisKit._utils.regularization import *
+from NeuroVisKit._utils.regularization import _calculate_padding
+from torch.nn import Identity as IdentityModule
 
 class Regularization(nn.Module):
     """
@@ -113,7 +116,7 @@ class RegularizationModule(Regularization):
     
 class ActivityRegularization(Regularization):
 
-    def __init__(self, module, coefficient=1, **kwargs):
+    def __init__(self, module, coefficient=1, input=False, **kwargs):
 
         super().__init__()
         self.coefficient = coefficient
@@ -122,8 +125,11 @@ class ActivityRegularization(Regularization):
         self.register_buffer('activations', torch.tensor(0.0))
         self._parent_class = ActivityRegularization # critical for extract_reg to work when importing from different paths
 
-        def get_activation(module, input, output):
-            self.activations = output
+        def get_activation(module, inp, output):
+            if input:
+                self.activations = inp[0]
+            else:
+                self.activations = output
             return output
         
         module.register_forward_hook(get_activation)

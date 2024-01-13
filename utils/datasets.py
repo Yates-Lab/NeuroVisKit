@@ -161,7 +161,7 @@ class ContiguousDataset(GenericDataset):
         }
         return ContiguousDataset(d, blocks)
         
-def BlockedDataLoader(dataset, inds=None, batch_size=1):
+def BlockedDataLoader(dataset, inds=None, batch_size=1, cpu_num_workers=0.5):
     '''
     Creates a dataloader that returns contiguous blocks of data from a dataset.
     Each block includes multiple samples, here "batch_size" operates on the block level and
@@ -180,7 +180,7 @@ def BlockedDataLoader(dataset, inds=None, batch_size=1):
         num_workers = 0
     else:
         import os
-        num_workers = os.cpu_count()//2
+        num_workers = int(os.cpu_count() * cpu_num_workers)
 
     dl = DataLoader(dataset, sampler=sampler, batch_size=None, num_workers=num_workers)
     return dl

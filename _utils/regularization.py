@@ -99,7 +99,7 @@ def extract_reg(module, proximal=False):
     def get_reg_helper(module):
         out_modules = []
         for current_module in module.children():
-            if hasattr(current_module, '_parent_class'): # critical for extract_reg to work when importing from different paths
+            if hasattr(current_module, '_parent_class') and current_module._parent_class.__name__ != "Regularization": # critical for extract_reg to work when importing from different paths
                 isproximal = current_module._parent_class.__name__ == 'ProximalRegularizationModule'
                 isregmodule = current_module._parent_class.__name__ == 'RegularizationModule'
                 isactivity = current_module._parent_class.__name__ == 'ActivityRegularization'
@@ -108,7 +108,8 @@ def extract_reg(module, proximal=False):
                         out_modules.append(current_module)
                 if isactivity and current_module.coefficient:
                     out_modules.append(current_module)
-            elif issubclass(type(current_module), nn.Module):
+            elif hasattr(current_module, 'children'):
+            # elif issubclass(type(current_module), nn.Module):
                 out_modules += get_reg_helper(current_module)
         return out_modules
     return get_reg_helper(module)
