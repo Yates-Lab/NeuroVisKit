@@ -206,12 +206,12 @@ def calculate_transient_r2(model, val_dl, cids, bins=(-40, 100), filter=True, sm
     return r2_score[sortby], sortby
     
 def plot_transientsC_new(model, val_dl, cids, bins=(-40, 100), filter=True, smooth=0, r2_score=False, topk=None, cid_idx=None, plot=True, reduction=torch.sum):
-    assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
+    # assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
     assert issubclass(type(model), nn.Module), "model must be a nn.Module"
     assert len(cids) > 0, "cids must be a list of channel ids"
     assert len(bins) == 2, "bins must be a tuple of length 2"
     # assert model_device(model) == dl_device(val_dl), "Model and data must be on same device"
-    assert hasattr(val_dl.dataset, 'covariates'), "val_dl.dataset must have covariates"
+    # assert hasattr(val_dl.dataset, 'covariates'), "val_dl.dataset must have covariates"
     if cid_idx is None:
         cid_idx = torch.arange(len(cids))
     device = extract_device(model)
