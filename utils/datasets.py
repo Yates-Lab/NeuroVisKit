@@ -50,7 +50,10 @@ class ContiguousDataset(GenericDataset):
         return len(self.block)
 
     def __getitem__(self, index):
-
+        # calling the super class returns a dictionary of tensors
+        return super().__getitem__(self.blockIndsToInds(index))
+    
+    def blockIndsToInds(self, index):
         if type(index) is int:
             relevant_blocks = [self.block[index]]
         elif type(index) is list:
@@ -63,9 +66,7 @@ class ContiguousDataset(GenericDataset):
 
         # unravels starts and stops for each block
         inds = [i for block in relevant_blocks for i in range(*block)]
-
-        # calling the super class returns a dictionary of tensors
-        return super().__getitem__(inds)
+        return inds
     
     def dsFromInds(self, inds, in_place=False, safe=True):
         if in_place:
@@ -80,7 +81,12 @@ class ContiguousDataset(GenericDataset):
                 block_len = self.block[i][1] - self.block[i][0]
                 blocks.append((block, block + block_len))
                 block += block_len
-            return ContiguousDataset(concat_dicts(*data), blocks)
+            out = ContiguousDataset(concat_dicts(*data), blocks)
+            if hasattr(self, 'stim_index'):
+                setattr(out, 'stim_index', self.stim_index[inds])
+            if hasattr(self, 'requested_stims'):
+                setattr(out, 'requested_stims', self.requested_stims)
+            return out
         raise NotImplementedError("Not implemented yet. please set safe=true")
         new_covariates = self[inds]
         blocks = [self.block[i] for i in range(len(self.block)) if i in inds]
