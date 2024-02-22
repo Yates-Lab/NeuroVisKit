@@ -98,8 +98,8 @@ class PytorchWrapper(ModelWrapper):
                 x = x['stim']
             if x.ndim == 3:
                 x = x.unsqueeze(1)
-            if x.ndim == 4:
-                x = x.unsqueeze(1)
+            # if x.ndim == 4:
+            #     x = x.unsqueeze(1)
         return self.model(x, *args, **kwargs)
     @property
     def lr(self):
