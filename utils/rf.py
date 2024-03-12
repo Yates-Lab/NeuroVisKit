@@ -375,7 +375,7 @@ def shift_stim_fourier(s, shift, size=None, batch_size=None):
     return shifted
 
     
-def shift_stim(stim, shift, size, mode='bilinear', batch_size=None):
+def shift_stim(stim, shift, size, scale = 1, grid_scale=1, mode='bilinear', batch_size=None, upsample_factor=1, upsample_mode='nearest', verbose=False, no_grad=False):
     '''
     This function samples a grid of size (size[0], size[1]) from the stimulus at the locations
     specified by shift. The shift is in pixels and is a 2D vector. The output is a tensor of size
@@ -399,24 +399,61 @@ def shift_stim(stim, shift, size, mode='bilinear', batch_size=None):
     '''
     
     import torch.nn.functional as F
+    from tqdm import tqdm
+    import gc
+
+    
     dy, dx = torch.meshgrid(torch.arange(size[0])-size[0]/2, torch.arange(size[1])-size[1]/2, indexing='ij')
-    scalex = (stim.shape[2]/2)
-    scaley = (stim.shape[3]/2)
-    dx = dx / scalex
-    dy = dy / scaley
-    dx = dx.unsqueeze(0).unsqueeze(-1)
-    dy = dy.unsqueeze(0).unsqueeze(-1)
+    scalex = (stim.shape[2]/2*scale)
+    scaley = (stim.shape[3]/2*scale)
+    dx = dx / scalex * grid_scale
+    dy = dy / scaley * grid_scale
+    dx = dx.unsqueeze(0).unsqueeze(-1).to(stim.device)
+    dy = dy.unsqueeze(0).unsqueeze(-1).to(stim.device)
+    if verbose:
+        print("Building grid...")
+        print("grid size: (dx: %d, dy: %d)" % (dx.shape[2], dy.shape[1]))
 
     sx = shift[:,0].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)/scalex
     sy = shift[:,1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)/scaley
 
-    grid = torch.cat((dx+sx, dy+sy), dim=-1).to(stim.device)
+    if verbose:
+        print("shift size: (sx: %d, sy: %d)" % (sx.shape[2], sy.shape[1]))
+
+    grid = torch.cat((dx+sx, dy+sy), dim=-1).to(stim.device) # TODO: make this batched if requested 
+    del dx, dy, sx, sy
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    if verbose:
+        print("shifting and resampling...")
+        if batch_size is not None:
+            loop = tqdm(range(0, stim.shape[0], batch_size))
+    else:
+        if batch_size is not None:
+            loop = range(0, stim.shape[0], batch_size)
 
     if batch_size is not None:
         out = torch.zeros((stim.shape[0], stim.shape[1], size[0], size[1]), device=stim.device)
-        for b in range(0, stim.shape[0], batch_size):
-            out[b:b+batch_size] = F.grid_sample(stim[b:b+batch_size], grid[b:b+batch_size], mode=mode, align_corners=True)
+        for b in loop:
+            stim_batch = stim[b:b+batch_size]
+            if upsample_factor > 1:
+                if no_grad:
+                    with torch.no_grad():
+                        stim_batch = F.interpolate(stim_batch, scale_factor=upsample_factor, mode=upsample_mode)
+                else:
+                    stim_batch = F.interpolate(stim_batch, scale_factor=upsample_factor, mode=upsample_mode)
+
+            if no_grad:
+                with torch.no_grad():
+                    out[b:b+batch_size] = F.grid_sample(stim_batch, grid[b:b+batch_size], mode=mode, align_corners=True)
+            else:
+                out[b:b+batch_size] = F.grid_sample(stim_batch, grid[b:b+batch_size], mode=mode, align_corners=True)
+
+            gc.collect()
     else:
+        if upsample_factor > 1:
+            stim = F.interpolate(stim, scale_factor=upsample_factor, mode=upsample_mode)
         out = F.grid_sample(stim, grid, mode=mode, align_corners=True)
 
     return out, grid
