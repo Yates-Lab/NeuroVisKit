@@ -60,9 +60,9 @@ class PLWrapper(pl.LightningModule):
     def on_train_start(self):
         if hasattr(self, 'train_eval_module'):
             self.train_eval_module.start(self.trainer.train_dataloader)
+        self.eval_module.startDS(train_ds=self.trainer.train_dataloader)
         if hasattr(self.model, 'on_train_start'):
             self.model.on_train_start(self)
-        self.eval_module.startDS(train_ds=self.trainer.train_dataloader)
         return super().on_train_start()
     
     def on_train_end(self):
