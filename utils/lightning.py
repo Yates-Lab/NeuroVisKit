@@ -2,10 +2,12 @@ import dill, json
 import torch
 import torch.nn as nn
 import lightning as pl
+import torch.nn.functional as F
 from NeuroVisKit._utils.utils import get_module_dict, import_module_by_path
 import NeuroVisKit.utils.models as models
 from NeuroVisKit.utils.evaluate import EvalModule
 import warnings
+import wandb
 import logging
 
 #this makes sure if we move stuff around, users dont need to change imports.
@@ -111,6 +113,9 @@ class PLWrapper(pl.LightningModule):
         if self.opt != torch.optim.LBFGS:
             loss = self.eval_module.closure()
             self.per_neuron_loss = loss.detach()
+            hist = wandb.Histogram(self.per_neuron_loss.clip(-1))
+            self.logger.experiment.log({"per_neuron_score": hist})
+            self.log("rectified_val_loss", -1*torch.mean(F.relu(loss)), prog_bar=True, on_epoch=True)
             self.log("val_loss", -1*torch.mean(loss), prog_bar=True, on_epoch=True)
         if hasattr(self.model, 'on_validation_epoch_end'):
             self.model.on_validation_epoch_end(self)

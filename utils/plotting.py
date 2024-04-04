@@ -29,6 +29,45 @@ def plot_model_conv(model):
         f.append(ft)
     return f
 
+def plot_square_grid1d(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', plotter=plt.plot, **kwargs):
+    '''
+        Plot a grid of figures such that each subfigure has m subplots.
+        mat is a list of lists of 1d data (n, m, x) or (n*m, x)
+        titles is a list of titles of length n*m
+    '''
+    mat = np.array(mat)
+    if mat.ndim == 3:
+        n = len(mat)
+        m = len(mat[0])
+        mat = mat.reshape(n*m, *mat.shape[2:])
+    else:
+        n = int(np.ceil(len(mat)**0.5))
+        m = int(np.ceil(len(mat)/n))
+    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(m*5, n))
+    
+    for i in tqdm(range(n), desc=desc):
+        for j in range(m):
+            if i*m+j >= len(mat):
+                break
+            img = mat[i*m+j]
+            #the following is a patch to fix an indexing error in matplotlib
+            if n == 1:
+                axs = axes[j]
+            elif m == 1:
+                axs = axes[i]
+            else:
+                axs = axes[i, j]
+            plt.sca(axs)
+            plotter(img)
+            if titles is not None:
+                axs.set_title(titles[i*m+j])
+        
+    for key in kwargs:
+        eval(f'plt.{key}')(kwargs[key])
+        
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    return fig
+
 def plot_square_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs):
     '''
         Plot a grid of figures such that each subfigure has m subplots.
@@ -47,6 +86,8 @@ def plot_square_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', *
     
     for i in tqdm(range(n), desc=desc):
         for j in range(m):
+            if i*m+j >= len(mat):
+                break
             img = mat[i*m+j]
             #the following is a patch to fix an indexing error in matplotlib
             if n == 1:

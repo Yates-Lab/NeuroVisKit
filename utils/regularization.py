@@ -71,7 +71,7 @@ class ProximalRegularizationModule(Regularization):
         return gradMagLog.apply(x, self.__class__.__name__)
     
 class RegularizationModule(Regularization):
-    def __init__(self, coefficient=1, shape=None, dims=None, target=None, keepdims=None, **kwargs):
+    def __init__(self, coefficient=1, shape=None, dims=None, target=None, keepdims=None, process=None, **kwargs):
         super().__init__()
         if is_nn_module(target):
             assert hasattr(target, 'weight')
@@ -94,6 +94,7 @@ class RegularizationModule(Regularization):
         self._parent_class = RegularizationModule # critical for extract_reg to work when importing from different paths
         
         self.log_gradients = kwargs.get('log_gradients', False)
+        self.process = process
     def function(self, x):
         raise NotImplementedError
     def forward(self, normalize=False):
@@ -102,6 +103,8 @@ class RegularizationModule(Regularization):
             x = self.log(x)
         if normalize:
             x = x / x.norm()
+        if self.process is not None:
+            x = self.process(x)
         y = torch.mean(self.function(x) * self.coefficient)
         assert y<1e10 and not torch.isnan(y), f'Penalty likely diverged for regularization type {self.__class__.__name__}'
         return y
@@ -251,7 +254,24 @@ class proximalGroupSparsity(ProximalRegularizationModule):
             out = x/norm * (norm - self.coefficient*self.lr).clamp(min=0)
             self.target.data = out
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
-    
+
+class proximalSparsityDekel(ProximalRegularizationModule):
+    def __init__(self, coefficient=1, target=None, groupdim=None, **kwargs):
+        super().__init__(coefficient=coefficient, target=target, **kwargs)
+        self.groupdim = [groupdim] if type(groupdim) is int else groupdim
+    def proximal(self):
+        #apply shrinkage base on the magnitude of the weights
+        with torch.no_grad():
+            #max across dims 
+            if self.groupdim:
+                norm = self.target.norm(2, dim=self.groupdim, keepdim=True)
+            else:
+                norm = self.target.abs()
+            mx = norm.amax((self.dims), keepdim=True)
+            shrinkage = (mx / (norm + 1e-6)).clamp(min=0) - 1
+            out = torch.sign(self.target) * (torch.abs(self.target) - self.coefficient*self.lr*shrinkage).clamp(min=0)
+            self.target.data = out
+        return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
 class proximalL1(ProximalPnorm):
     def __init__(self, coefficient=1e-1, target=None, **kwargs):
         super().__init__(coefficient=coefficient, target=target, p=1, **kwargs)
