@@ -4,6 +4,7 @@ from torch.utils.data import Dataset
 import numpy as np
 import tqdm
 import NeuroVisKit.utils.utils as utils
+import torch.nn.functional as F
 
 class GenericDataset(Dataset):
     '''
@@ -190,3 +191,48 @@ def BlockedDataLoader(dataset, inds=None, batch_size=1, cpu_num_workers=0.5):
 
     dl = DataLoader(dataset, sampler=sampler, batch_size=None, num_workers=num_workers)
     return dl
+
+class DSAutoDFS(ContiguousDataset):
+    def __init__(self, data, blocks, num_lags):
+        super().__init__(data, blocks)
+        self.num_lags = num_lags
+    def __getitem__(self, idx):
+        if isinstance(idx, int):
+            return self.dfsfy(super().__getitem__(idx))
+        elif isinstance(idx, slice):
+            #convert slice to list
+            idx = list(range(*idx.indices(len(self))))
+        return self.collate([self.dfsfy(self[i]) for i in idx])
+    def dfsfy(self, batch):
+        batch["dfs"] = torch.ones_like(batch["robs"])
+        batch["dfs"][:self.num_lags-1] = 0
+        if len(batch["robs"]) < 500:
+            p = 500 - len(batch["robs"])
+            batch["robs"] = F.pad(batch["robs"], (0, 0, 0, p))
+            batch["dfs"] = F.pad(batch["dfs"], (0, 0, 0, p))
+            batch["stim"] = F.pad(batch["stim"], (0, 0, 0, 0, 0, 0, 0, p))
+        return batch
+    def collate(self, batches):
+        d = {}
+        for k in batches[0].keys():
+            d[k] = torch.concat([b[k] for b in batches])  
+        return d
+    
+def split_blocks(ds, train_inds, val_inds, max_block_size=500, num_lags=60):
+    blocks_sizes = np.diff(np.array(ds.block),1)[:,0]
+    for inds in [train_inds]:
+        for ind in range(len(inds)):
+            i = inds[ind]
+            if blocks_sizes[i] > max_block_size:
+                s, e = ds.block[i]
+                snew, enew = s, min(s + max_block_size, e)
+                assert enew - snew <= max_block_size
+                ds.block[i] = [snew, enew]
+                # snew = s + max_block_size - num_lags + 1
+                while enew < e:
+                    snew = snew + max_block_size - num_lags + 1
+                    enew = min(snew + max_block_size, e)
+                    assert enew - snew <= max_block_size
+                    ds.block.append([snew, enew])
+                    inds.append(len(ds.block) - 1)
+    return ds, train_inds, val_inds

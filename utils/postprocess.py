@@ -18,56 +18,6 @@ def get_zero_irfC(input_dims, model, neuron_inds=None, device='cpu'):
     )
     return rf.detach().cpu()
 
-class Evaluator(nn.Module):
-    """Module that evaluates the log-likelihood of a model on a given dataset.
-    This can be used for training.
-    
-    Instructions:
-    - initialize with a list of neuron indices to evaluate.
-    - call startDS to initialize null estimates (firing rate means).
-    - 
-    
-    """
-    def __init__(self, cids):
-        super().__init__()
-        self.cids = cids
-        self.LLnull, self.LLsum, self.nspikes = 0, 0, 0
-    def startDS(self, train_ds=None, means=None):
-        """Initialize null estimates (firing rate means).
-
-        Either provide a training dataset or a tensor of means.
-        """
-        if means is not None:
-            self.register_buffer("mean_spikes", means)
-        elif train_ds is not None:
-            sum_spikes = (train_ds.covariates["robs"][:, self.cids] * train_ds.covariates["dfs"][:, self.cids]).sum(dim=0)
-            self.register_buffer("mean_spikes", sum_spikes / train_ds.covariates["dfs"][:, self.cids].sum(dim=0))
-        else:
-            raise ValueError("Either train_ds or means must be provided.")
-    def getLL(self, pred, batch):
-        """Compute poisson log-likelihood of a batch of predictions.
-        """
-        poisson_ll = batch["robs"][:, self.cids] * torch.log(pred + 1e-8) - pred
-        return (poisson_ll * batch["dfs"][:, self.cids]).sum(dim=0)
-    def __call__(self, rpred, batch):
-        """Evaluate model on a batch of data.
-        Args:
-            rpred (Tensor): predicted firing rates shaped (batch_size, num_neurons=len(cids)).
-            batch (dict): dictionary of tensors with keys "dfs" and "robs".
-        """
-        llsum = self.getLL(rpred, batch).cpu()
-        llnull = self.getLL(self.mean_spikes.to(rpred.device).expand(*rpred.shape), batch).cpu()
-        self.LLnull = self.LLnull + llnull
-        self.LLsum = self.LLsum + llsum
-        self.nspikes = self.nspikes + (batch["dfs"][:, self.cids] * batch["robs"][:, self.cids]).sum(dim=0).cpu()
-        del llsum, llnull, rpred, batch
-    def closure(self):
-        """Compute bits/spike for the neurons evaluated so far and reset counters.
-        """
-        bps = (self.LLsum - self.LLnull)/self.nspikes.clamp(1)/np.log(2)
-        self.LLnull, self.LLsum, self.nspikes = 0, 0, 0
-        return bps
-    
 def eval_model(model, val_dl, train_ds=None, means=None):
     '''
         Evaluate model on validation data.

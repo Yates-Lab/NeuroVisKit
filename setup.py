@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 import setuptools
 
 if __name__ == "__main__":
@@ -22,7 +21,16 @@ if __name__ == "__main__":
             'NeuroVisKit._utils': '_utils',
             'NeuroVisKit._future': '_future'
         },
-        # package_data={
-        #     'NeuroVisKit': ['*'],
-        # }
+        install_requires=[
+            'lightning',
+            'numpy',
+            'tqdm',
+            'dill',
+            'wandb',
+            'imageio',
+            'matplotlib',
+            'scipy',
+            'scikit-image',
+            'IPython'
+        ]
     )

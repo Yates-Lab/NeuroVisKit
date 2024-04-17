@@ -74,9 +74,8 @@ class PytorchWrapper(ModelWrapper):
     Args:
         ModelWrapper (_type_): _description_
     """
-    def __init__(self, model, *args, cids=None, bypass_preprocess=False, **kwargs):
+    def __init__(self, model, *args, cids=None, **kwargs):
         super().__init__(model, *args, cids=cids, **kwargs)
-        self.bypass_preprocess = bypass_preprocess
         if not hasattr(self, 'cids'):
             self.cids = cids
         self.reg = regularization.extract_reg(self.model, proximal=False)
@@ -92,14 +91,7 @@ class PytorchWrapper(ModelWrapper):
         return loss
     def compute_proximal_reg_loss(self, *args, **kwargs):
         return sum([r() for r in self.proximal_reg]+[0.0])
-    def forward(self, x, pass_dict=False, *args, **kwargs):
-        if not self.bypass_preprocess:
-            if type(x) is dict and not pass_dict:
-                x = x['stim']
-            if x.ndim == 3:
-                x = x.unsqueeze(1)
-            # if x.ndim == 4:
-            #     x = x.unsqueeze(1)
+    def forward(self, x, *args, **kwargs):
         return self.model(x, *args, **kwargs)
     @property
     def lr(self):

@@ -18,6 +18,7 @@ class EvalModule(nn.Module):
             self.register_buffer("mean_spikes", means)
         elif train_ds is not None:
             if hasattr(train_ds, 'covariates'):
+                print("Using train_ds to calculate mean spikes")
                 sum_spikes = (train_ds.covariates["robs"][:, self.cids] * train_ds.covariates["dfs"][:, self.cids]).sum(dim=0)
                 total_valid = train_ds.covariates["dfs"][:, self.cids].sum(dim=0)
             else:
@@ -52,4 +53,12 @@ class EvalModule(nn.Module):
             print(f"(ignore if just sanity checking) no spikes detected for neurons {zeros}. Check your cids, data and datafilters.")
             self.reset()
             return torch.tensor(0.0)
-        return (self.LLsum - self.LLnull)/self.nspikes.clamp(1)/np.log(2)
+        bps = (self.LLsum - self.LLnull)/self.nspikes.clamp(1)/np.log(2)
+        self.reset()
+        return bps
+    
+class Evaluator(EvalModule):
+    """(synonym for EvalModule) Module that evaluates the log-likelihood of a model on a given dataset.
+    """
+    pass
+    

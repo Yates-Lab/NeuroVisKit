@@ -113,6 +113,14 @@ def auto_device():
         raise ValueError(f'No GPU with more than 5000 MB of free memory found. Free memory: {memories}')
     
 def get_device_fancy(device):
+    """Get a device from a string or device. If device is 'auto', it will choose the device with the most available memory.
+
+    Args:
+        device (device|str): the device to get
+
+    Returns:
+        device: the device
+    """
     if isinstance(device, str):
         if device.lower() == 'auto':
             return auto_device()

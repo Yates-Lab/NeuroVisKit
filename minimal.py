@@ -1,35 +1,31 @@
+#%%
 '''
     Script for generating a nice fitting pipeline.
 '''
-#%%
 #!%load_ext autoreload
 #!%autoreload 2
-from NeuroVisKit._utils.utils import seed_everything
-import torch.nn.functional as F
-import torch.nn as nn
+from NeuroVisKit._utils import get_device_fancy, pl_device_format
+import torch
 import lightning as pl
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-import NeuroVisKit.utils.lightning as utils
+from NeuroVisKit.utils.lightning import PLWrapper
+from NeuroVisKit.utils.loss import Poisson
 from NeuroVisKit.utils.models import PytorchWrapper
 #%%
-seed_everything(0)
-device = 'cpu' # should be '0,' or '1,' or '0,1,' or 'cpu'
+pl.seed_everything(0)
+device = get_device_fancy("auto") #automatically select device with most available memory
 checkpoint_dir = None # put checkpoint dir here
 version = None #optional version number for logging
-accumulate_batches = 1 # number of batches to accumulate before backprop
 val_dl, train_dl = None, None # put dataloaders here
 # Load model and preprocess data.
-model = None#put model here
-#loss defaults to poisson if you dont set it
-model = PytorchWrapper(model, loss=None, cids=None, bypass_preprocess=False) # bypass_preprocess allows dict to be passed straight to model
-model = utils.PLWrapper(model, lr=1e-3, optimizer=None, preprocess_data=None) # preprocess_data is a function that dynamically preprocesses the data (see utils.lightning)
-callbacks = [
-    EarlyStopping(monitor='val_loss', patience=30, verbose=1, mode='min'),
-] # this breaks with LBFGS please remove
+model = None #put model here
+model = PytorchWrapper(model, loss=Poisson()) #loss defaults to Poisson
+model = PLWrapper(model, lr=1e-3, optimizer=torch.optim.Adam) #optimizer defaults to Adam, LR defaults to 1e-3
+
 trainer_args = {
     "callbacks": [
-        *callbacks,
+        EarlyStopping(monitor='val_loss', patience=30, verbose=1, mode='min'),
         ModelCheckpoint(
             dirpath=checkpoint_dir,
             filename='model',
@@ -41,10 +37,10 @@ trainer_args = {
         ),
     ],
     "accelerator": "cpu" if device == 'cpu' else "gpu",
-    "logger": TensorBoardLogger(checkpoint_dir, version=0),
-    "accumulate_grad_batches": accumulate_batches,
+    "logger": TensorBoardLogger(checkpoint_dir, version=0), #we recommend using wandb instead of tensorboard
 }
 if device != 'cpu':
-    trainer_args["devices"] = device
+    trainer_args["devices"] = pl_device_format(device) #if using GPU, specify device in PL format
+    
 trainer = pl.Trainer(**trainer_args, default_root_dir=checkpoint_dir, max_epochs=1000)
 trainer.fit(model, val_dataloaders=val_dl, train_dataloaders=train_dl)

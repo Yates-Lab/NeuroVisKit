@@ -273,13 +273,16 @@ class proximalSparsityDekel(ProximalRegularizationModule):
             self.target.data = out
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
 class proximalL1(ProximalPnorm):
-    def __init__(self, coefficient=1e-1, target=None, **kwargs):
+    def __init__(self, coefficient=1e-1, target=None, norm=None, **kwargs):
         super().__init__(coefficient=coefficient, target=target, p=1, **kwargs)
+        self.norm = norm
     def proximal(self):
         #reimplented for speed in the case of p=1
         with torch.no_grad():
             x = self.target
-            out = torch.sign(x) * (torch.abs(x) - self.coefficient*self.lr).clamp(min=0)
+            norm = self.norm(torch.abs(x), dim=self.dims, keepdim=True) if self.norm is not None else 1
+            shrinkage = self.coefficient*self.lr*norm
+            out = torch.sign(x) * (torch.abs(x) - shrinkage).clamp(min=0)
             self.target.data = out
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
 
