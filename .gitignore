@@ -1,0 +1,14 @@
+*.pt
+*.pyc
+*.pkl
+data/*
+*__pycache__*
+*.gif
+*.txt
+*.pdf
+*.png
+checkpoints/*
+*.egg-info/*
+build/*
+data/*
+dist/*
