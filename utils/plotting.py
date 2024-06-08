@@ -70,6 +70,8 @@ def plot_square_grid1d(mat, titles=None, vmin=None, vmax=None, desc='Grid plot',
         titles is a list of titles of length n
     '''
     mat = np.array(mat)
+    if mat.ndim == 2:
+        mat = mat[..., None]
     n = int(np.ceil(len(mat)**0.5))
     m = int(np.ceil(len(mat)/n))
     mat = np.pad(mat, ((0, n*m-len(mat)), (0, 0), (0, 0)))

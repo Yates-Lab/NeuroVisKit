@@ -63,6 +63,7 @@ class ProximalRegularizationModule(Regularization):
         """
         raise NotImplementedError
     def forward(self):
+        assert torch.isfinite(self.target).all(), f'Non-finite values detected in target tensor for regularization type {self.__class__.__name__}. f"percent finite: {torch.isfinite(self.target).float().mean().item()}"'
         with torch.no_grad():
             out = torch.mean(self.proximal())
         if self.log_gradients:
@@ -98,6 +99,7 @@ class RegularizationModule(Regularization):
     def function(self, x):
         raise NotImplementedError
     def forward(self, normalize=False):
+        assert torch.isfinite(self.target).all(), f'Non-finite values detected in target tensor for regularization type {self.__class__.__name__}. f"percent finite: {torch.isfinite(self.target).float().mean().item()}"'
         x = self.target
         if self.log_gradients:
             x = self.log(x)
