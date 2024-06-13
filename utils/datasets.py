@@ -193,9 +193,19 @@ def BlockedDataLoader(dataset, inds=None, batch_size=1, cpu_num_workers=0.5):
     return dl
 
 class DSAutoDFS(ContiguousDataset):
-    def __init__(self, data, blocks, num_lags):
+    """
+        Dataset with automatic (and dynamic) data filter generation.
+        
+        data is a dictionary of tensors.
+        blocks is a list of tuples, each tuple is a start and stop index for a block of contiguous data.
+        num_lags is the number of lags to filtered out in the beginning of each block.
+        min_blocksize is the minimum size of each block.
+        
+    """
+    def __init__(self, data, blocks, num_lags, min_blocksize=500):
         super().__init__(data, blocks)
         self.num_lags = num_lags
+        self.min_blocksize = min_blocksize
     def __getitem__(self, idx):
         if isinstance(idx, int):
             return self.dfsfy(super().__getitem__(idx))
@@ -206,8 +216,8 @@ class DSAutoDFS(ContiguousDataset):
     def dfsfy(self, batch):
         batch["dfs"] = torch.ones_like(batch["robs"])
         batch["dfs"][:self.num_lags-1] = 0
-        if len(batch["robs"]) < 500:
-            p = 500 - len(batch["robs"])
+        if len(batch["robs"]) < self.min_blocksize:
+            p = self.min_blocksize - len(batch["robs"])
             batch["robs"] = F.pad(batch["robs"], (0, 0, 0, p))
             batch["dfs"] = F.pad(batch["dfs"], (0, 0, 0, p))
             batch["stim"] = F.pad(batch["stim"], (0, 0, 0, 0, 0, 0, 0, p))
