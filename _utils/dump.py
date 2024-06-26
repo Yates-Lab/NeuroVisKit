@@ -31,3 +31,6 @@ def hann_window(shape):
     for i in range(len(shape)):
         window = window * torch.hann_window(shape[i]).reshape(-1, *([1]*(len(shape)-1-i)))
     return window
+def interleave(a, b):
+    # interleave two arrays across the first dimension
+    return np.stack([a, b], axis=1).reshape(-1, *a.shape[1:])

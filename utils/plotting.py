@@ -78,7 +78,7 @@ def plot_square_grid1d(mat, titles=None, vmin=None, vmax=None, desc='Grid plot',
     mat = mat.reshape(n, m, *mat.shape[1:])
     return plot_grid1d(mat, titles=titles, vmin=vmin, vmax=vmax, desc=desc, plotter=plotter, width=width, **kwargs)
 
-def plot_square_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', **kwargs):
+def plot_square_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', plotter=None, **kwargs):
     '''
         Plot a grid of figures such that each subfigure has m subplots.
         mat is a list of lists of image data (n, m, x, y) or (n*m, x, y)
@@ -106,10 +106,14 @@ def plot_square_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', *
                 axs = axes[i]
             else:
                 axs = axes[i, j]
-            axs.imshow(img, vmin=vmin, vmax=vmax, interpolation='none')
-            axs.axis('off')
-            if titles is not None:
-                axs.set_title(titles[i*m+j])
+            if plotter is not None:
+                plt.sca(axs)
+                plotter(img)
+            else:
+                axs.imshow(img, vmin=vmin, vmax=vmax, interpolation='none')
+                axs.axis('off')
+                if titles is not None:
+                    axs.set_title(titles[i*m+j])
             
     for key in kwargs:
         eval(f'plt.{key}')(kwargs[key])
