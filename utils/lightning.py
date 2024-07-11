@@ -108,6 +108,8 @@ class PLWrapper(pl.LightningModule):
     def on_validation_epoch_start(self) -> None:
         if self.opt != torch.optim.LBFGS:
             self.eval_module.reset()
+        if hasattr(self.model, 'on_validation_epoch_start'):
+            self.model.on_validation_epoch_start(self)
     
     def on_validation_epoch_end(self) -> None:
         if self.opt != torch.optim.LBFGS:

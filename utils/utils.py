@@ -68,7 +68,9 @@ def r2_numpy(y, y_hat, dfs=None, dim=0):
         ybar = np.mean(y, axis=dim, keepdims=True)
         dfs = 1
     else:
-        ybar = (y * dfs).sum(axis=dim, keepdims=True) / dfs.sum(axis=dim, keepdims=True)
+        y = np.where(dfs, y, 0)
+        y_hat = np.where(dfs, y_hat, 0)
+        ybar = (y*dfs).sum(axis=dim, keepdims=True) / dfs.sum(axis=dim, keepdims=True)
         
     var_tot = np.sum(dfs*(y - ybar)**2, axis=dim)
     var_res = np.sum(dfs*(y - y_hat)**2, axis=dim)
@@ -273,3 +275,43 @@ def plot_transientsC_new(model, val_dl, cids, bins=(-40, 100), filter=True, smoo
         plt.title("R2 dist for transients smoothed with window length %d. Avg is %.2f" %(smooth, r2_score.mean()))
         return transientY, transientY_hat, [f2, f]
     return transientY, transientY_hat, f
+
+def plot_transientsC_singleDS(val_dl, cids, bins=(-40, 100), filter=True, smooth=0, cid_idx=None, plot=True, reduction=torch.sum, device=None):
+    # assert issubclass(type(val_dl), DataLoader), "val_dl must be a DataLoader"
+    assert len(cids) > 0, "cids must be a list of channel ids"
+    assert len(bins) == 2, "bins must be a tuple of length 2"
+    if device is None:
+        device = next(iter(val_dl))['stim'].device
+    # assert model_device(model) == dl_device(val_dl), "Model and data must be on same device"
+    # assert hasattr(val_dl.dataset, 'covariates'), "val_dl.dataset must have covariates"
+    if cid_idx is None:
+        cid_idx = torch.arange(len(cids))
+    N = sum([len(batch['sac_on']) for batch in val_dl])
+    sac_on = torch.zeros((N, 1), dtype=torch.bool, device=device)
+    Y = torch.zeros(N, len(cid_idx), dtype=torch.float32, device=device)
+    with torch.no_grad():
+        i = 0
+        for batch in tqdm(val_dl, desc="Preparing for transient computation."):
+            b = len(batch['stim'])
+            for k in batch.keys():
+                batch[k] = batch[k].to(device)
+            sac_on[i:i+b] = batch['sac_on']
+            Y[i:i+b] = batch['robs'][:, cids][:, cid_idx]
+            if filter:
+                Y[i:i+b] *= batch['dfs'][:, cids][:, cid_idx]
+            i += b
+    inds = torch.where(sac_on)[0].to(device)
+    nsacs = len(inds)
+    del sac_on
+    transientY = event_triggered_op(Y, inds, bins, reduction=reduction).cpu().numpy()
+    del Y
+    binsize = 1/240
+    transientY = transientY/nsacs/binsize
+    if smooth:
+        transientY = signal.savgol_filter(transientY, window_length=smooth, polyorder=1, axis=0)
+    if plot:
+        x = np.arange(bins[0], bins[1])*binsize*1000
+        def plotter(y):
+            plt.plot(x, y)
+        plot_square_grid1d(transientY.T[:, :, None], plotter=plotter, width=2.5)
+    return transientY

@@ -39,7 +39,8 @@ class ModelWrapper(nn.Module):
     def training_step(self, batch, batch_idx=None, alternative_loss_fn=None):  # batch_indx not used, right?
         y = batch['robs'][:,self.cids]
         y_hat = self(batch)
-
+        assert y.shape[-1] == y_hat.shape[-1], f"y shape: {y.shape}, y_hat shape: {y_hat.shape}"
+        
         if alternative_loss_fn is None:
             if 'dfs' in batch.keys():
                 dfs = batch['dfs'][:,self.cids]
