@@ -1,4 +1,5 @@
 
+from random import shuffle
 import torch
 from torch.utils.data import Dataset
 import numpy as np
@@ -167,6 +168,75 @@ class ContiguousDataset(GenericDataset):
             "dfs": dfs,
         }
         return ContiguousDataset(d, blocks)
+    
+class BlockAdaptiveSampler(torch.utils.data.sampler.Sampler):
+    def __init__(self, block_sizes, min_block_size=500, inds=None):
+        if inds is not None:
+            self.block_inds = inds
+            assert len(self.block_inds) == len(block_sizes), "block_sizes and inds must have the same length"
+        else:
+            self.block_inds = np.arange(len(block_sizes)) 
+        self.block_sizes = block_sizes
+        self.ind_to_size = {i: s for i, s in zip(self.block_inds, self.block_sizes)}
+        self.min_block_size = min_block_size
+        self.is_reset = False
+        self.reset()
+    def test(self):
+        import matplotlib.pyplot as plt
+        blocks = []
+        block_sizes = []
+        for b in self.blocks:
+            blocks.extend(b)
+            block_sizes.append(sum([self.ind_to_size[i] for i in b]))
+        for i in self.block_inds:
+            assert i in blocks, f"{i} not in blocks"
+        plt.hist(block_sizes)
+        return block_sizes
+    def reset(self):
+        inds = np.random.permutation(len(self.block_sizes))
+        shuffled_block_sizes = self.block_sizes[inds]
+        shuffled_block_inds = self.block_inds[inds]
+        #go from block_ind_to_counter
+        blocks = []
+        ctr = 0
+        while ctr < len(shuffled_block_sizes):
+            block_size = 0
+            block = []
+            while block_size < self.min_block_size and ctr < len(shuffled_block_sizes):
+                block_size += shuffled_block_sizes[ctr]
+                block.append(int(shuffled_block_inds[ctr]))
+                ctr += 1
+            blocks.append(block)
+        if block_size < self.min_block_size:
+            last_block = blocks.pop()
+            smallest_block_inds = np.argsort([sum([self.ind_to_size[i] for i in b]) for b in blocks])
+            for i in range(len(last_block)):
+                blocks[smallest_block_inds[i]].append(last_block[i])
+        self.blocks = blocks
+        self.is_reset = True
+    def __iter__(self):
+        if not self.is_reset:
+            self.reset()
+        self.is_reset = False
+        for b in self.blocks:
+            yield b
+    def __len__(self):
+        return len(self.blocks)
+
+def BlockedAdaptiveDataLoader(dataset, inds=None, min_block_size=500, cpu_num_workers=0.5, num_lags=None):
+    from torch.utils.data import DataLoader
+    assert hasattr(dataset, 'block'), "Dataset must have block attribute"
+    block_sizes = np.diff(np.array(dataset.block),1)[:,0] - (num_lags-1 or 0)
+    if inds is None:
+        inds = list(range(len(dataset)))
+    sampler = BlockAdaptiveSampler(block_sizes[inds], min_block_size, inds)
+    if dataset.covariates['stim'].device.type == 'cuda':
+        num_workers = 0
+    else:
+        import os
+        num_workers = int(os.cpu_count() * cpu_num_workers)
+    dl = DataLoader(dataset, sampler=sampler, batch_size=None, num_workers=num_workers)
+    return dl
         
 def BlockedDataLoader(dataset, inds=None, batch_size=1, cpu_num_workers=0.5):
     '''
@@ -207,12 +277,14 @@ class DSAutoDFS(ContiguousDataset):
         self.num_lags = num_lags
         self.min_blocksize = min_blocksize
     def __getitem__(self, idx):
-        if isinstance(idx, int):
-            return self.dfsfy(super().__getitem__(idx))
-        elif isinstance(idx, slice):
+        if isinstance(idx, slice):
             #convert slice to list
             idx = list(range(*idx.indices(len(self))))
-        return self.collate([self.dfsfy(self[i]) for i in idx])
+        elif not hasattr(idx, "__iter__"):
+            if hasattr(idx, "item"):
+                idx = idx.item()
+            return self.dfsfy(super().__getitem__(idx))
+        return self.collate([self[i] for i in idx])
     def dfsfy(self, batch):
         batch["dfs"] = torch.ones_like(batch["robs"])
         batch["dfs"][:self.num_lags-1] = 0
@@ -245,4 +317,4 @@ def split_blocks(ds, train_inds, val_inds, max_block_size=500, num_lags=60):
                     assert enew - snew <= max_block_size
                     ds.block.append([snew, enew])
                     inds.append(len(ds.block) - 1)
-    return ds, train_inds, val_inds
+    return ds, np.array(train_inds, dtype=np.int64), np.array(val_inds, dtype=np.int64)

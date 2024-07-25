@@ -29,7 +29,7 @@ def plot_model_conv(model):
         f.append(ft)
     return f
 
-def plot_grid1d(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', plotter=plt.plot, width=5, **kwargs):
+def plot_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, width=5, **kwargs):
     '''
         Plot a grid of figures such that each subfigure has m subplots.
         mat is a list of lists of 1d data (n, m, x, p)
@@ -62,7 +62,7 @@ def plot_grid1d(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', plotte
         
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     return fig
-def plot_square_grid1d(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', plotter=plt.plot, width=5, **kwargs):
+def plot_square_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, width=5, **kwargs):
     '''
         Plot a grid of n subplots.
         mat is a list of lists of 1d data (n, x, p)
@@ -76,7 +76,8 @@ def plot_square_grid1d(mat, titles=None, vmin=None, vmax=None, desc='Grid plot',
     m = int(np.ceil(len(mat)/n))
     mat = np.pad(mat, ((0, n*m-len(mat)), (0, 0), (0, 0)))
     mat = mat.reshape(n, m, *mat.shape[1:])
-    return plot_grid1d(mat, titles=titles, vmin=vmin, vmax=vmax, desc=desc, plotter=plotter, width=width, **kwargs)
+    titles = None if titles is None else list(titles) + ['']*(n*m-len(titles))
+    return plot_grid1d(mat, titles=titles, desc=desc, plotter=plotter, width=width, **kwargs)
 
 def plot_square_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', plotter=None, **kwargs):
     '''

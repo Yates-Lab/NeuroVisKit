@@ -13,6 +13,10 @@ import platform
 import time
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import lab
+    
+def concat_dicts(ds):
+    return {k: torch.cat([d[k] for d in ds], dim=0) for k in ds[0].keys()}
 
 def reclass(obj, new_class_object=None):
     """

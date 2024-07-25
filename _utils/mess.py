@@ -42,8 +42,9 @@ def whiten(x, eps=1e-8):
     return x @ U @ torch.diag(1/(S+eps).sqrt()) @ U.T
 def angular_binning(x, bins=8, hrange=(-1, 1), wrange=(0, 1)):
     # x is (n, d)
-    h = torch.linspace(hrange[1], hrange[0], x.shape[-2], device=x.device)
-    w = torch.linspace(wrange[0], wrange[1], x.shape[-1], device=x.device)
+    device = x.device if hasattr(x, "device") else "cpu"
+    h = torch.linspace(hrange[1], hrange[0], x.shape[-2], device=device)
+    w = torch.linspace(wrange[0], wrange[1], x.shape[-1], device=device)
     H, W = torch.meshgrid(h, w, indexing="ij")
     theta = torch.atan2(H, W)
     x = x**2
@@ -53,33 +54,51 @@ def angular_binning(x, bins=8, hrange=(-1, 1), wrange=(0, 1)):
     return hist / hist.sum()
 def angular_binning_kde(x, bins=8, hrange=(-1, 1), wrange=(0, 1)):
     # x is (n, d)
+    device = x.device if hasattr(x, "device") else "cpu"
     from scipy.stats import gaussian_kde
-    h = torch.linspace(hrange[1], hrange[0], x.shape[-2], device=x.device)
-    w = torch.linspace(wrange[0], wrange[1], x.shape[-1], device=x.device)
+    h = torch.linspace(hrange[1], hrange[0], x.shape[-2], device=device)
+    w = torch.linspace(wrange[0], wrange[1], x.shape[-1], device=device)
     H, W = torch.meshgrid(h, w, indexing="ij")
     theta = torch.atan2(H, W)
     x = x**2
     if x.sum() == 0:
         return np.zeros(bins)
+    if np.isnan(x.sum()):
+        return np.zeros(bins) * np.nan
     x = x / x.sum()
     bins = np.linspace(-np.pi/2, np.pi/2, bins+1)
     bins = bins[:-1] + (bins[1] - bins[0])/2
+    if np.count_nonzero(x) == 1:
+        theta_on = theta[np.argmax(x)]
+        best_bin = np.argmin(np.abs(bins - np.array(theta_on)))
+        out = np.zeros(len(bins))
+        out[best_bin] = 1
+        return out
     k = gaussian_kde(theta.flatten(), weights=x.flatten())
     hist = k(bins)
     return hist / hist.sum()
 def radial_binning_kde(x, bins=8, hrange=(-1, 1), wrange=(0, 1)):
     # x is (n, d)
+    device = x.device if hasattr(x, "device") else "cpu"
     from scipy.stats import gaussian_kde
-    h = torch.linspace(hrange[1], hrange[0], x.shape[-2], device=x.device)
-    w = torch.linspace(wrange[0], wrange[1], x.shape[-1], device=x.device)
+    h = torch.linspace(hrange[1], hrange[0], x.shape[-2], device=device)
+    w = torch.linspace(wrange[0], wrange[1], x.shape[-1], device=device)
     H, W = torch.meshgrid(h, w, indexing="ij")
     r = torch.sqrt(H**2 + W**2)
     x = x**2
     if x.sum() == 0:
         return np.zeros(bins)
+    if np.isnan(x.sum()):
+        return np.zeros(bins) * np.nan
     x = x / x.sum()
     bins = np.linspace(0, 1, bins+1)
     bins = bins[:-1] + (bins[1] - bins[0])/2
+    if np.count_nonzero(x) == 1:
+        r_on = r[np.argmax(x)]
+        best_bin = np.argmin(np.abs(bins - np.array(r_on)))
+        out = np.zeros(len(bins))
+        out[best_bin] = 1
+        return out
     k = gaussian_kde(r.flatten(), weights=x.flatten())
     hist = k(bins)
     return hist / hist.sum()
@@ -87,9 +106,17 @@ def kde_ang(theta, robs, bins=8):
     # x is (n, d)
     if sum(robs) == 0:
         return np.zeros(bins)
+    if ~np.isfinite(robs.sum()):
+        return np.zeros(bins) * np.nan
     from scipy.stats import gaussian_kde
     bins = np.linspace(0, 180, bins+1)
     bins = bins[:-1] + (bins[1] - bins[0])/2
+    if np.count_nonzero(robs) == 1:
+        theta_on = theta[np.argmax(robs)]
+        best_bin = np.argmin(np.abs(bins - np.array(theta_on)))
+        out = np.zeros(len(bins))
+        out[best_bin] = 1
+        return out
     k = gaussian_kde(theta.flatten(), weights=robs.flatten())
     hist = k(bins)
     return hist / hist.sum()
@@ -97,9 +124,17 @@ def kde_rad(r, robs, bins=8):
     # x is (n, d)
     if sum(robs) == 0:
         return np.zeros(bins)
+    if ~np.isfinite(robs.sum()):
+        return np.zeros(bins) * np.nan
     from scipy.stats import gaussian_kde
     bins = np.linspace(min(r), max(r), bins+1)
     bins = bins[:-1] + (bins[1] - bins[0])/2
+    if np.count_nonzero(robs) == 1:
+        r_on = r[np.argmax(robs)]
+        best_bin = np.argmin(np.abs(bins - np.array(r_on)))
+        out = np.zeros(len(bins))
+        out[best_bin] = 1
+        return out
     k = gaussian_kde(r.flatten(), weights=robs.flatten())
     hist = k(bins)
     return hist / hist.sum()
