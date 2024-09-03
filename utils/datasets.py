@@ -272,10 +272,13 @@ class DSAutoDFS(ContiguousDataset):
         min_blocksize is the minimum size of each block.
         
     """
-    def __init__(self, data, blocks, num_lags, min_blocksize=500):
+    def __init__(self, data, blocks, num_lags, min_blocksize=500, block_dfs_start=0):
         super().__init__(data, blocks)
         self.num_lags = num_lags
         self.min_blocksize = min_blocksize
+        if not torch.is_tensor(block_dfs_start):
+            block_dfs_start = torch.ones(num_lags-1) * block_dfs_start
+        self.block_dfs_start = block_dfs_start
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             #convert slice to list
@@ -287,7 +290,7 @@ class DSAutoDFS(ContiguousDataset):
         return self.collate([self[i] for i in idx])
     def dfsfy(self, batch):
         batch["dfs"] = torch.ones_like(batch["robs"])
-        batch["dfs"][:self.num_lags-1] = 0
+        batch["dfs"][:self.num_lags-1] = self.block_dfs_start.to(batch["dfs"].device)[:, None]
         if len(batch["robs"]) < self.min_blocksize:
             p = self.min_blocksize - len(batch["robs"])
             batch["robs"] = F.pad(batch["robs"], (0, 0, 0, p))
