@@ -41,14 +41,14 @@ class PLWrapper(pl.LightningModule):
         self.save_hyperparameters(ignore=['wrapped_model', 'preprocess_data'])
         if hasattr(self.wrapped_model, 'lr'):
             self.wrapped_model.lr = self.learning_rate
-    def train(self, mode=True):
-        if mode:
-            if hasattr(self.opt, 'train'):
-                self.opt_instance.train()
-        else:
-            if hasattr(self.opt, 'eval'):
-                self.opt_instance.eval()
-        return super().train(mode)
+    # def train(self, mode=True):
+    #     # if mode:
+    #     #     if hasattr(self.opt, 'train'):
+    #     #         self.opt_instance.train()
+    #     # else:
+    #     #     if hasattr(self.opt, 'eval'):
+    #     #         self.opt_instance.eval()
+    #     return super().train(mode)
     def on_train_epoch_start(self):
         # if hasattr(self.opt, 'train'):
         #     self.opt.train()
