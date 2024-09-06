@@ -19,7 +19,7 @@ def plot_model_conv(model):
         # if issubclass(type(module), nn.modules.conv._ConvNd):
         w = module.weight.detach().data.cpu().numpy()
         if len(w.shape) == 5: # 3d conv (cout, cin, x, y, t)
-            w = w.squeeze(1) # asume cin is 1
+            w = w.mean(1) # asume cin is 1
             w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize all |xyt (1, 2, 3)
         elif len(w.shape) == 4: # 2d conv (cout, cin, x, y)
             w = w/np.abs(w).max((1, 2, 3), keepdims=True) # normalize all |cin xy (1, 2, 3)
