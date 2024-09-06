@@ -1,3 +1,4 @@
+from re import T
 import dill, json
 import torch
 import torch.nn as nn
@@ -40,7 +41,22 @@ class PLWrapper(pl.LightningModule):
         self.save_hyperparameters(ignore=['wrapped_model', 'preprocess_data'])
         if hasattr(self.wrapped_model, 'lr'):
             self.wrapped_model.lr = self.learning_rate
-        
+    # def train(self, mode=True):
+    #     # if mode:
+    #     #     if hasattr(self.opt, 'train'):
+    #     #         self.opt_instance.train()
+    #     # else:
+    #     #     if hasattr(self.opt, 'eval'):
+    #     #         self.opt_instance.eval()
+    #     return super().train(mode)
+    def on_train_epoch_start(self):
+        # if hasattr(self.opt, 'train'):
+        #     self.opt.train()
+        if hasattr(self.model, 'on_train_epoch_start'):
+            self.model.on_train_epoch_start(self)
+    def on_train_epoch_end(self):
+        if hasattr(self.model, 'on_train_epoch_end'):
+            self.model.on_train_epoch_end(self)
     def forward(self, x):
         return self.wrapped_model(self.preprocess_data(x))
     
@@ -106,6 +122,8 @@ class PLWrapper(pl.LightningModule):
         return losses["val_loss"]
     
     def on_validation_epoch_start(self) -> None:
+        # if hasattr(self.opt, 'eval'):
+        #     self.opt.eval()
         if self.opt != torch.optim.LBFGS:
             self.eval_module.reset()
         if hasattr(self.model, 'on_validation_epoch_start'):

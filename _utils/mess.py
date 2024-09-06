@@ -1,5 +1,6 @@
 from scipy.ndimage import gaussian_filter
 import numpy as np
+from NeuroVisKit._utils.utils import to_device
 import torch
 
 def get_gaus_kernel(shape):
@@ -11,15 +12,34 @@ def get_gaus_kernel(shape):
         k = gaussian_filter(k, shape[i]/5).reshape(-1, *([1]*(len(shape)-1-i)))
         kernel = kernel * k
     return kernel
-def split_batched_op(input, op, groups=2, device="cpu"):
-    b = input.shape[0]
+def index_into(obj, index, end=None):
+    if isinstance(obj, dict):
+        return {k: index_into(v, index, end=end) for k, v in obj.items()}
+    if end is not None:
+        return obj[index:end]
+    return obj[index]
+def len_(obj):
+    if isinstance(obj, dict):
+        return len(obj[list(obj.keys())[0]])
+    return len(obj)
+def split_batched_op(input, op, groups=2, device="cpu", inplace=False):
+    b = len_(input)
     gsize = int(np.ceil(b / groups))
-    i = 0
-    while i < b:
-        iend = min(i+gsize, b)
-        input[i:iend] = op(input[i:iend].to(device)).cpu()
-        i = iend
-    return input
+    if inplace:
+        i = 0
+        while i < b:
+            iend = min(i+gsize, b)
+            input[i:iend] = op(to_device(index_into(input, i, iend), device)).cpu()
+            i = iend  
+        return input  
+    else:
+        out = []
+        i = 0
+        while i < b:
+            iend = min(i+gsize, b)
+            out.append(op(to_device(index_into(input, i, iend), device)).cpu())
+            i = iend
+        return torch.cat(out, dim=0)
 
 class IndexableDict(dict):
     def __getitem__(self, key):
