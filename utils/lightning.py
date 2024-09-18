@@ -33,8 +33,9 @@ class PLWrapper(pl.LightningModule):
         self.preprocess_data = preprocess_data
         assert hasattr(self.wrapped_model, 'cids'), "model must have cids attribute"
         self.cids = self.wrapped_model.cids
+        self.meta_cids = self.wrapped_model.meta_cids if hasattr(self.wrapped_model, 'meta_cids') else None
         self.register_buffer("per_neuron_loss", torch.zeros((len(self.cids)),))
-        self.eval_module = EvalModule(self.cids)
+        self.eval_module = EvalModule(self.cids, self.meta_cids)
         if normalize_loss:
             raise NotImplementedError("normalize_loss is not implemented yet")
             # self.train_eval_module = TrainEvalModule(self.loss.unit_loss, self.cids)
@@ -42,12 +43,12 @@ class PLWrapper(pl.LightningModule):
         if hasattr(self.wrapped_model, 'lr'):
             self.wrapped_model.lr = self.learning_rate
     # def train(self, mode=True):
-    #     # if mode:
-    #     #     if hasattr(self.opt, 'train'):
-    #     #         self.opt_instance.train()
-    #     # else:
-    #     #     if hasattr(self.opt, 'eval'):
-    #     #         self.opt_instance.eval()
+    #     #get optimizer
+    #     opt = self.optimizers()
+    #     if hasattr(opt, 'train') and mode:
+    #         opt.train()
+    #     elif hasattr(opt, 'eval') and not mode:
+    #         opt.eval()
     #     return super().train(mode)
     def on_train_epoch_start(self):
         # if hasattr(self.opt, 'train'):
@@ -133,8 +134,9 @@ class PLWrapper(pl.LightningModule):
         if self.opt != torch.optim.LBFGS:
             loss = self.eval_module.closure()
             self.per_neuron_loss = loss.detach()
-            hist = wandb.Histogram(self.per_neuron_loss.clip(-1))
-            self.logger.experiment.log({"per_neuron_score": hist})
+            if hasattr(self.logger.experiment, 'log'):
+                hist = wandb.Histogram(self.per_neuron_loss.clip(-1))
+                self.logger.experiment.log({"per_neuron_score": hist})
             self.log("rectified_val_loss", -1*torch.mean(F.relu(loss)), prog_bar=True, on_epoch=True)
             self.log("val_loss", -1*torch.mean(loss), prog_bar=True, on_epoch=True)
         if hasattr(self.model, 'on_validation_epoch_end'):

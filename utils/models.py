@@ -14,14 +14,13 @@ class ModelWrapper(nn.Module):
             model, # the model to be trained
             loss=Poisson(), # the loss function to use
             cids = None, # which units to use during fitting
+            meta_cids = None, # which units to use during fitting
             **kwargs,
             ):
         
         super().__init__()
-        if cids is None:
-            if hasattr(model, 'cids'):
-                cids = model.cids
-        self.cids = cids
+        self.cids = model.cids if cids is None and hasattr(model, 'cids') else cids
+        self.meta_cids = model.meta_cids if meta_cids is None and hasattr(model, 'meta_cids') else meta_cids
         
         self.model = model
         if hasattr(model, 'name'):
@@ -37,13 +36,13 @@ class ModelWrapper(nn.Module):
     def forward(self, batch):
         return self.model(batch)
     def training_step(self, batch, batch_idx=None, alternative_loss_fn=None):  # batch_indx not used, right?
-        y = batch['robs'][:,self.cids]
-        y_hat = self(batch)
+        y = batch['robs'][:,self.cids][:,self.meta_cids]
+        y_hat = self(batch)[:, self.meta_cids]
         assert y.shape[-1] == y_hat.shape[-1], f"y shape: {y.shape}, y_hat shape: {y_hat.shape}"
         
         if alternative_loss_fn is None:
             if 'dfs' in batch.keys():
-                dfs = batch['dfs'][:,self.cids]
+                dfs = batch['dfs'][:,self.cids][:, self.meta_cids]
                 loss = self.loss(y_hat, y, dfs)
             else:
                 loss = self.loss(y_hat, y)
@@ -56,12 +55,12 @@ class ModelWrapper(nn.Module):
 
     def validation_step(self, batch, batch_idx=None):
         
-        y = batch['robs'][:,self.cids]
+        y = batch['robs'][:,self.cids][:,self.meta_cids]
         
-        y_hat = self(batch)
+        y_hat = self(batch)[:,self.meta_cids]
 
         if 'dfs' in batch.keys():
-            dfs = batch['dfs'][:,self.cids]
+            dfs = batch['dfs'][:,self.cids][:,self.meta_cids]
             loss = self.loss(y_hat, y, dfs)
         else:
             loss = self.loss(y_hat, y)
