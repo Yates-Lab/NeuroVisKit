@@ -6,9 +6,9 @@ import torch
 def get_gaus_kernel(shape):
     kernel = np.ones(shape)
     for i in range(len(shape)):
-        assert shape[i] % 2 == 1
+        # assert shape[i] % 2 == 1
         k = np.zeros(shape[i])
-        k[shape[i]//2] = 1
+        k[shape[i]//2 + shape[i] % 2 - 1] = 1
         k = gaussian_filter(k, shape[i]/5).reshape(-1, *([1]*(len(shape)-1-i)))
         kernel = kernel * k
     return kernel
@@ -126,7 +126,7 @@ def kde_ang(theta, robs, bins=8):
     # x is (n, d)
     if sum(robs) == 0:
         return np.zeros(bins)
-    if ~np.isfinite(robs.sum()):
+    if not np.isfinite(robs.sum()):
         return np.zeros(bins) * np.nan
     from scipy.stats import gaussian_kde
     bins = np.linspace(0, 180, bins+1)
@@ -144,7 +144,7 @@ def kde_rad(r, robs, bins=8):
     # x is (n, d)
     if sum(robs) == 0:
         return np.zeros(bins)
-    if ~np.isfinite(robs.sum()):
+    if not np.isfinite(robs.sum()):
         return np.zeros(bins) * np.nan
     from scipy.stats import gaussian_kde
     bins = np.linspace(min(r), max(r), bins+1)
