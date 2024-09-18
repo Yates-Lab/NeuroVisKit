@@ -2,6 +2,109 @@ from scipy.ndimage import gaussian_filter
 import numpy as np
 from NeuroVisKit._utils.utils import to_device
 import torch
+import matplotlib.pyplot as plt
+import io
+from PIL import Image
+import wandb as wdb
+import torch.nn as nn
+import torch.nn.functional as F
+
+class PrintShape(nn.Module):
+    def forward(self, x):
+        print(x.shape)
+        return x
+
+class Split(nn.Module):
+    def __init__(self, interleave=True):
+        super().__init__()
+        self.interleave = interleave
+    def forward(self, x):
+        if self.interleave:
+            return concatenate_interleave(x, -x, 1)
+        
+class Power(nn.Module):
+    def __init__(self, p):
+        super().__init__()
+        self.p = p
+    def forward(self, x):
+        return x**self.p
+
+class Padding(nn.Module):
+    def __init__(self, k, op=nn.Identity()):
+        super().__init__()
+        self.k = k
+        self.op = op
+    def forward(self, x):
+        return self.op(F.pad(x, (self.k, self.k, self.k, self.k)))
+
+class Scaffold(nn.Module):
+    def __init__(self, *ops):
+        super().__init__()
+        self.ops = nn.ModuleList(ops)
+    def forward(self, x):
+        outs = []
+        for op in self.ops:
+            x = op(x)
+            outs.append(x)
+        sz = min([x.shape[-1] for x in outs])
+        outs = [F.interpolate(i, size=sz, mode='nearest') for i in outs]
+        # outs.append(self.ops[-1](x))
+        return torch.cat(outs, dim=1)
+
+class HalfChannelOp(nn.Module):
+    def __init__(self, op):
+        super().__init__()
+        self.op = op
+    def forward(self, x):
+        c = x.shape[1] // 2
+        return torch.cat([self.op(x[:, :c]), x[:, c:]], dim=1)
+
+def fig_to_pil(fig):
+    #matplotlib figure to PIL image
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    buf.seek(0)
+    return wdb.Image(Image.open(buf))
+
+def concatenate_interleave(t1, t2, dim):
+    # Reshape t1 and t2 to have an additional dimension at the specified dimension
+    t1 = t1.unsqueeze(dim + 1)
+    t2 = t2.unsqueeze(dim + 1)
+    
+    # Concatenate along the new dimension and reshape the result
+    interleaved = torch.cat((t1, t2), dim=dim + 1)
+    interleaved = interleaved.view(list(t1.shape[:dim]) + [-1] + list(t1.shape[dim + 2:]))
+    return interleaved
+
+def get_window(shape, dims=None, wfunc=torch.hamming_window):
+    if dims is None:
+        dims = [i for i in range(len(shape))]
+    w = 1
+    for i in dims:
+        s = [1 for i in range(len(shape))]
+        s[i] = -1
+        w = w * wfunc(shape[i], periodic=False).reshape(s)
+    return w
+
+def get_conv_window(kshape, kdims=None, wfunc=torch.hamming_window):
+    if kdims is None:
+        kdims = [i for i in range(len(kshape))]
+    kdims = [i+2 for i in kdims]
+    return get_window([1, 1]+list(kshape), kdims, wfunc)
+
+def window_tensor(x, dims=None, p_runtime=1, p_init=0):
+    cls = type(x)
+    def to(self, *args, **kwargs):
+        a = cls.to(self, *args, **kwargs)
+        a.w = a.w.to(*args, **kwargs)
+        return a
+    def windowed(self):
+        return self.w**self.p_runtime * cls.data.__get__(self)
+    setattr(x, "w", get_window(x.shape, dims=dims))
+    setattr(x, "to", to)
+    setattr(x, "windowed", property(fget=windowed))
+    x.data = x.w**p_init * x.data
+    return x
 
 def get_gaus_kernel(shape):
     kernel = np.ones(shape)
