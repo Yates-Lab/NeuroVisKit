@@ -1,4 +1,5 @@
 import torch.nn as nn
+import numpy as np
 # from models import ModelWrapper
 # from models import CNNdense as CNNdenseNDNT
 from NeuroVisKit.utils import regularization
@@ -21,6 +22,7 @@ class ModelWrapper(nn.Module):
         super().__init__()
         self.cids = model.cids if cids is None and hasattr(model, 'cids') else cids
         self.meta_cids = model.meta_cids if meta_cids is None and hasattr(model, 'meta_cids') else meta_cids
+        self.meta_cids = np.arange(len(self.cids)) if self.meta_cids is None else self.meta_cids
         
         self.model = model
         if hasattr(model, 'name'):
