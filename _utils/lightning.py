@@ -35,6 +35,8 @@ def pl_device_format(device):
     """
     if type(device) == torch.device:
         device = str(device)
+    if "cpu" in device:
+        return 'cpu'
     if type(device) == str:
         return ",".join(device.split("cuda:"))[1:] + ','
 
