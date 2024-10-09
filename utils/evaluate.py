@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from tqdm import tqdm
 
 class EvalModule(nn.Module):
     """Module that evaluates the log-likelihood of a model on a given dataset.
@@ -26,7 +27,7 @@ class EvalModule(nn.Module):
                 device = next(iter(train_ds))["robs"].device
                 sum_spikes = torch.zeros(len(self.cids), device=device)
                 total_valid = torch.zeros(len(self.cids), device=device)
-                for b in train_ds:
+                for b in tqdm(train_ds):
                     sum_spikes = sum_spikes + (b["dfs"][:, self.cids] * b["robs"][:, self.cids]).sum(dim=0)
                     total_valid = total_valid + b["dfs"][:, self.cids].sum(dim=0)
             self.register_buffer("mean_spikes", (sum_spikes / total_valid)[self.meta_cids])
