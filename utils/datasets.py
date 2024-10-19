@@ -16,17 +16,18 @@ class GenericDataset(Dataset):
     '''
     def __init__(self,
         data):
-
         self.covariates = data
-        self.requested_covariates = list(self.covariates.keys())
-
+    
+    @property
+    def requested_covariates(self):
+        return list(self.covariates.keys())
+    
     def to(self, device):
         self.covariates = utils.to_device(self.covariates, device)
         return self
         
     def __len__(self):
-
-        return self.covariates['stim'].shape[0]
+        return next(iter(self.covariates.values())).shape[0]
 
     def __getitem__(self, index):
         return {cov: self.covariates[cov][index,...] for cov in self.requested_covariates}
@@ -228,7 +229,7 @@ def BlockedAdaptiveDataLoader(dataset, inds=None, min_block_size=500, cpu_num_wo
     assert hasattr(dataset, 'block'), "Dataset must have block attribute"
     block_sizes = np.diff(np.array(dataset.block),1)[:,0] - (num_lags-1 or 0)
     if inds is None:
-        inds = list(range(len(dataset)))
+        inds = np.array(list(range(len(dataset))))
     sampler = BlockAdaptiveSampler(block_sizes[inds], min_block_size, inds)
     if dataset.covariates['stim'].device.type == 'cuda':
         num_workers = 0
@@ -261,7 +262,7 @@ def BlockedDataLoader(dataset, inds=None, batch_size=1, cpu_num_workers=0.5):
 
     dl = DataLoader(dataset, sampler=sampler, batch_size=None, num_workers=num_workers)
     return dl
-
+    
 class DSAutoDFS(ContiguousDataset):
     """
         Dataset with automatic (and dynamic) data filter generation.
@@ -303,7 +304,24 @@ class DSAutoDFS(ContiguousDataset):
             d[k] = torch.concat([b[k] for b in batches])  
         return d
     
-def split_blocks(ds, train_inds, val_inds, max_block_size=500, num_lags=60):
+def split_blocks(ds, max_block_size=500, num_lags=60, inds=None):
+    blocks_sizes = np.diff(np.array(ds.block),1)[:,0]
+    inds = list(range(len(ds.block)))
+    for i in inds:
+        if blocks_sizes[i] > max_block_size:
+            s, e = ds.block[i]
+            snew, enew = s, min(s + max_block_size, e)
+            assert enew - snew <= max_block_size
+            ds.block[i] = [snew, enew]
+            # snew = s + max_block_size - num_lags + 1
+            while enew < e:
+                snew = snew + max_block_size - num_lags + 1
+                enew = min(snew + max_block_size, e)
+                assert enew - snew <= max_block_size
+                ds.block.append([snew, enew])
+    return ds
+
+def split_blocks_old(ds, train_inds, val_inds, max_block_size=500, num_lags=60):
     blocks_sizes = np.diff(np.array(ds.block),1)[:,0]
     for inds in [train_inds]:
         for ind in range(len(inds)):
@@ -321,3 +339,24 @@ def split_blocks(ds, train_inds, val_inds, max_block_size=500, num_lags=60):
                     ds.block.append([snew, enew])
                     inds.append(len(ds.block) - 1)
     return ds, np.array(train_inds, dtype=np.int64), np.array(val_inds, dtype=np.int64)
+
+def remove_small_blocks(ds, min_block_size=20):
+    blocks = np.diff(np.array(ds.block),1)[:,0]
+    inds = np.where(blocks >= min_block_size)[0]
+    return ds.dsFromInds(inds)
+
+def train_val_split(ds, train_size=0.8, seed=0):
+    np.random.seed(seed)
+    blocks = np.diff(np.array(ds.block),1)[:,0]
+    perm = np.random.permutation(len(blocks))
+    train_inds = []
+    train_len, total_len = 0, blocks.sum()
+    i = 0
+    while train_len < train_size * total_len and i < len(perm):
+        j = perm[i]
+        train_inds.append(j)
+        train_len += blocks[j]
+        i += 1
+    print(f"achieved {train_len/sum(blocks):.3f}")
+    val_inds = np.setdiff1d(np.arange(len(blocks)), train_inds)
+    return ds.dsFromInds(train_inds), ds.dsFromInds(val_inds)

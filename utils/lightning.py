@@ -173,3 +173,7 @@ class PLWrapper(pl.LightningModule):
         plmodel = PLWrapper(wrapped_model=model, preprocess_data=PreprocessFunction(config["dynamic_preprocess"]), **cp["hyper_parameters"]) 
         plmodel.load_state_dict(cp["state_dict"])
         return plmodel
+    def pre_save(self):
+        if hasattr(self.model, 'pre_save'):
+            return self.model.pre_save(self)
+        return self.wrapped_model

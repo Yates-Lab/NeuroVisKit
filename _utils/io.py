@@ -98,7 +98,7 @@ def dump(obj, file):
 class CPU_Unpickler(dill.Unpickler):
     def find_class(self, module, name):
         if module == 'torch.storage' and name == '_load_from_bytes':
-            return lambda b: torch.load(io.BytesIO(b), map_location=torch.device('cpu'))
+            return lambda b: torch.load(io.BytesIO(b), map_location=torch.device('cpu'), weights_only=False)
         else:
             return super().find_class(module, name)
         

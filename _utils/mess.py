@@ -9,6 +9,9 @@ import wandb as wdb
 import torch.nn as nn
 import torch.nn.functional as F
 
+def concat_dicts(*ds):
+    return {k: torch.cat([d[k] for d in ds], dim=0) for k in ds[0].keys()}
+            
 class PrintShape(nn.Module):
     def forward(self, x):
         print(x.shape)
@@ -73,7 +76,14 @@ def concatenate_interleave(t1, t2, dim):
     
     # Concatenate along the new dimension and reshape the result
     interleaved = torch.cat((t1, t2), dim=dim + 1)
-    interleaved = interleaved.view(list(t1.shape[:dim]) + [-1] + list(t1.shape[dim + 2:]))
+    interleaved = interleaved.reshape(list(t1.shape[:dim]) + [-1] + list(t1.shape[dim + 2:]))
+    return interleaved
+
+def concatenate_interleave_many(*ts, dim=0):
+    # Reshape t1 and t2 to have an additional dimension at the specified dimension
+    ts = [t.unsqueeze(dim + 1) for t in ts]
+    interleaved = torch.cat(ts, dim=dim + 1)
+    interleaved = interleaved.view(list(ts[0].shape[:dim]) + [-1] + list(ts[0].shape[dim + 2:]))
     return interleaved
 
 def get_window(shape, dims=None, wfunc=torch.hamming_window):

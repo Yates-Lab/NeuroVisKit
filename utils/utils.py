@@ -74,7 +74,7 @@ def r2_numpy(y, y_hat, dfs=None, dim=0):
         
     var_tot = np.sum(dfs*(y - ybar)**2, axis=dim)
     var_res = np.sum(dfs*(y - y_hat)**2, axis=dim)
-    return 1 - var_res/var_tot
+    return 1 - var_res/(var_tot + 1e-6)
 
 def r2_dfs(y, yhat, dfs=None):
     ''' 

@@ -193,17 +193,19 @@ class Pnorm(RegularizationModule):
         return out
     
 class ProximalPnorm(ProximalRegularizationModule):
-    def __init__(self, coefficient=1, target=None, p=1, **kwargs):
+    def __init__(self, coefficient=1, target=None, p=1, norm=torch.amax, **kwargs):
         super().__init__(coefficient=coefficient, target=target, **kwargs)
         self.p = p
+        self.norm = norm
     def proximal(self):
         # Calculate proximal operator for p-norm
         #grad = norm**(1-p) * abs(x)**(p-1) * torch.sign(x)
         with torch.no_grad():
-            x = self.target
+            scaling = self.norm(torch.abs(self.target), dim=self.dims, keepdim=True) + 1e-8 if self.norm else 1
+            x = self.target / scaling
             grads = x.norm(self.p, dim=self.dims, keepdim=True)**(1-self.p) * torch.abs(x)**(self.p-1)
             out = torch.sign(x) * (torch.abs(x) - self.coefficient*self.lr*grads).clamp(min=0)
-            self.target.data = out
+            self.target.data = out * scaling
         return out.mean([i for i in range(len(out.shape)) if i not in self.keepdims])
     
 class Convolutional(RegularizationModule):

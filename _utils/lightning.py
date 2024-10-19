@@ -12,8 +12,9 @@ class ThoroughModelCheckpoint(ModelCheckpoint):
     def _save_checkpoint(self, trainer, filepath) -> None:
         #make any dirs if needed
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
-        dump(trainer.lightning_module, filepath)
+
+        out = trainer.lightning_module.pre_save() if hasattr(trainer.lightning_module, 'pre_save') else trainer.lightning_module
+        dump(out, filepath)
         # trainer.save_checkpoint(filepath, self.save_weights_only)
 
         self._last_global_step_saved = trainer.global_step
