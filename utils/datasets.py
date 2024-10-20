@@ -290,8 +290,8 @@ class DSAutoDFS(ContiguousDataset):
             return self.dfsfy(super().__getitem__(idx))
         return self.collate([self[i] for i in idx])
     def dfsfy(self, batch):
-        batch["dfs"] = torch.ones_like(batch["robs"])
-        batch["dfs"][:self.num_lags-1] = self.block_dfs_start.to(batch["dfs"].device)[:, None]
+        batch["dfs"] = torch.ones_like(batch["robs"]) * (batch["dfs"] if hasattr(batch, "dfs") else 1)
+        batch["dfs"][:self.num_lags-1] = batch["dfs"][:self.num_lags-1] * self.block_dfs_start.to(batch["dfs"].device)[:, None]
         if len(batch["robs"]) < self.min_blocksize:
             p = self.min_blocksize - len(batch["robs"])
             batch["robs"] = F.pad(batch["robs"], (0, 0, 0, p))
