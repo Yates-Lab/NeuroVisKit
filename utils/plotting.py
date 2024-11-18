@@ -29,7 +29,7 @@ def plot_model_conv(model):
         f.append(ft)
     return f
 
-def plot_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, width=5, **kwargs):
+def plot_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, width=5, height=1, ind=False, **kwargs):
     '''
         Plot a grid of figures such that each subfigure has m subplots.
         mat is a list of lists of 1d data (n, m, x, p)
@@ -40,7 +40,7 @@ def plot_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, width=5, *
     n = len(mat)
     m = len(mat[0])
     mat = mat.reshape(n*m, *mat.shape[2:])
-    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(m*width, n))
+    fig, axes = plt.subplots(nrows=n, ncols=m, figsize=(m*width, n*height))
     for i in tqdm(range(n), desc=desc):
         for j in range(m):
             if i*m+j >= len(mat):
@@ -54,7 +54,10 @@ def plot_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, width=5, *
             else:
                 axs = axes[i, j]
             plt.sca(axs)
-            plotter(img)
+            if ind:
+                plotter(img, ind=i*m+j)
+            else:
+                plotter(img)
             if titles is not None:
                 axs.set_title(titles[i*m+j])
     for key in kwargs:
@@ -62,7 +65,7 @@ def plot_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, width=5, *
         
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     return fig
-def plot_square_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, width=5, **kwargs):
+def plot_square_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, width=5, height=1, ind=False, **kwargs):
     '''
         Plot a grid of n subplots.
         mat is a list of lists of 1d data (n, x, p)
@@ -77,7 +80,7 @@ def plot_square_grid1d(mat, titles=None, desc='Grid plot', plotter=plt.plot, wid
     mat = np.pad(mat, ((0, n*m-len(mat)), (0, 0), (0, 0)))
     mat = mat.reshape(n, m, *mat.shape[1:])
     titles = None if titles is None else list(titles) + ['']*(n*m-len(titles))
-    return plot_grid1d(mat, titles=titles, desc=desc, plotter=plotter, width=width, **kwargs)
+    return plot_grid1d(mat, titles=titles, desc=desc, plotter=plotter, width=width, height=height, ind=ind, **kwargs)
 
 def plot_square_grid(mat, titles=None, vmin=None, vmax=None, desc='Grid plot', plotter=None, **kwargs):
     '''

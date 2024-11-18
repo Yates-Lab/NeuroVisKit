@@ -135,9 +135,9 @@ class PLWrapper(pl.LightningModule):
             loss = self.eval_module.closure()
             self.per_neuron_loss = loss.detach()
             if hasattr(self.logger.experiment, 'log'):
-                hist = wandb.Histogram(self.per_neuron_loss.clip(-1))
+                hist = wandb.Histogram(self.per_neuron_loss.clip(-1, 3))
                 self.logger.experiment.log({"per_neuron_score": hist})
-            self.log("rectified_val_loss", -1*torch.mean(F.relu(loss)), prog_bar=True, on_epoch=True)
+            self.log("rectified_val_loss", -1*torch.mean(loss.clip(0, 3)), prog_bar=True, on_epoch=True)
             self.log("val_loss", -1*torch.mean(loss), prog_bar=True, on_epoch=True)
         if hasattr(self.model, 'on_validation_epoch_end'):
             self.model.on_validation_epoch_end(self)

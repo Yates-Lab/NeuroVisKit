@@ -262,7 +262,13 @@ def BlockedDataLoader(dataset, inds=None, batch_size=1, cpu_num_workers=0.5):
 
     dl = DataLoader(dataset, sampler=sampler, batch_size=None, num_workers=num_workers)
     return dl
-    
+
+def pad_first_dim(t, pad_size):
+    # pad_size is a tuple of (left, right), pad the first dimension of tensor t that has shape (N, ...)
+    padding_dims = pad_size
+    for _ in range(1, t.dim()):
+        padding_dims = (0, 0) + padding_dims
+    return F.pad(t, padding_dims)
 class DSAutoDFS(ContiguousDataset):
     """
         Dataset with automatic (and dynamic) data filter generation.
@@ -290,13 +296,12 @@ class DSAutoDFS(ContiguousDataset):
             return self.dfsfy(super().__getitem__(idx))
         return self.collate([self[i] for i in idx])
     def dfsfy(self, batch):
-        batch["dfs"] = torch.ones_like(batch["robs"]) * (batch["dfs"] if hasattr(batch, "dfs") else 1)
+        batch["dfs"] = batch["dfs"] if "dfs" in batch else torch.ones_like(batch["robs"])
         batch["dfs"][:self.num_lags-1] = batch["dfs"][:self.num_lags-1] * self.block_dfs_start.to(batch["dfs"].device)[:, None]
         if len(batch["robs"]) < self.min_blocksize:
             p = self.min_blocksize - len(batch["robs"])
-            batch["robs"] = F.pad(batch["robs"], (0, 0, 0, p))
-            batch["dfs"] = F.pad(batch["dfs"], (0, 0, 0, p))
-            batch["stim"] = F.pad(batch["stim"], (0, 0, 0, 0, 0, 0, 0, p))
+            for k in batch.keys():
+                batch[k] = pad_first_dim(batch[k], (0, p))
         return batch
     def collate(self, batches):
         d = {}
