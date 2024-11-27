@@ -22,12 +22,14 @@ if __name__ == "__main__":
             # 'NeuroVisKit._future': '_future'
         },
         install_requires=[
-            'lightning',
             'numpy',
             'tqdm',
+            'lab',
+            'ipykernel',
             'dill',
             'wandb',
             'imageio',
+            'lightning',
             'matplotlib',
             'scipy',
             'scikit-image',
