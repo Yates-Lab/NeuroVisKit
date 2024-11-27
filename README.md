@@ -6,10 +6,24 @@ We build on top of pytorch, allowing for the latest advancements in ML to be use
 2. See tutorials for various tutorials and examples.
 
 ## Installation
-Please make sure you have pytorch installed in order to fully utilize NeuroVisKit.
-
+### Environment (recommended)
+It is recommended to create and activate a virtual environment using conda
 ```
-pip install NeuroVisKit
+conda create -n nvk python==3.11
+conda activate nvk
+```
+First, install pytorch or make sure it is installed. Then install NeuroVisKit itself in one of three ways
+1. From server (may be out of date)
+```
+python -m pip install NeuroVisKit
+```
+2. Directly from github
+```
+python -m pip install git+https://github.com/Yates-Lab/NeuroVisKit.git
+```
+3. From source (clone repo)
+```
+python -m pip install .
 ```
 
 ### Advance Installation
