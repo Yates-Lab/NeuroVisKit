@@ -35,7 +35,7 @@ For installing an editable version, clone and then run
 
 ```
 cd NeuroVisKit
-pip install -e . -vvv
+python -m pip install -e . -vvv
 ```
 
 If imports don't work smoothly, go to VSCODE and search:
