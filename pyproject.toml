@@ -1,3 +1,7 @@
+[project]
+name = "NeuroVisKit"
+version = "0.0.2"
+
 [build-system]
 requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
