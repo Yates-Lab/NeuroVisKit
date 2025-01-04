@@ -4,7 +4,7 @@ import setuptools
 if __name__ == "__main__":
     setuptools.setup(
         name='NeuroVisKit',
-        version="0.0.1",
+        version="0.0.2",
         description='NeuroVisKit',
         author='Dekel Galor',
         packages=[
